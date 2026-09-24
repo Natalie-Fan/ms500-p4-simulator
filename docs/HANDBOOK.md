@@ -46,7 +46,7 @@ It does **not** emulate the rest of the device: no web UI, MQTT, real uploads, o
 In Git Bash:
 
 ```bash
-cd /d/git/ms500-p4-similator
+cd /d/git/ms500-p4-simulator
 py -3.11 -m venv .venv
 .venv/Scripts/python -m pip install -e ".[dev,gui]"      # core + GUI + tests
 .venv/Scripts/python -m pip install -e ".[yolo]"         # optional: obstruction detector (~2 GB)

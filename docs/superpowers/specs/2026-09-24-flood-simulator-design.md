@@ -60,7 +60,7 @@ Taken from the firmware repo at commit `7c9bed2`:
 ## Architecture
 
 ```
-D:\git\ms500-p4-similator\
+D:\git\ms500-p4-simulator\
 ├── native\
 │   ├── CMakeLists.txt         FIRMWARE_DIR (default D:\git\NETWORK_P4_FLOOD_DETECTION, env override
 │   │                          FLOOD_FIRMWARE_DIR) → glob process_flood_detection/*.c (CONFIGURE_DEPENDS)

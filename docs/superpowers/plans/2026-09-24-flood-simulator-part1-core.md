@@ -19,7 +19,7 @@
 
 ## Global Constraints
 
-- Repo root: `D:\git\ms500-p4-similator`. All commands run in Git Bash from the repo root.
+- Repo root: `D:\git\ms500-p4-simulator`. All commands run in Git Bash from the repo root.
 - Firmware repo: `FIRMWARE_DIR` default `D:/git/NETWORK_P4_FLOOD_DETECTION`, env override `FLOOD_FIRMWARE_DIR`. Firmware sources are compiled in place and **never copied or edited**.
 - Toolchain: MinGW gcc + CMake + Ninja (all on PATH); C standard C11 with extensions off.
 - Python: `py -3.11 -m venv .venv`; run everything with `.venv/Scripts/python`.
@@ -4638,7 +4638,7 @@ Expected: 2 passed (Dry-day, Dry-night). If it fails, report the two numbers; do
 - [ ] **Step 4: Write `README.md`**
 
 ````markdown
-# ms500-p4-similator
+# ms500-p4-simulator
 
 Runs the MS500-P4 firmware's flood-detection C code — unmodified, compiled straight from
 `D:\git\NETWORK_P4_FLOOD_DETECTION` — on image and video files instead of the camera.

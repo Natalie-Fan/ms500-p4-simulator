@@ -1,4 +1,4 @@
-# ms500-p4-similator
+# ms500-p4-simulator
 
 Runs the MS500-P4 firmware's flood-detection C code — unmodified, compiled straight from
 `D:\git\NETWORK_P4_FLOOD_DETECTION` — on image and video files instead of the camera.
