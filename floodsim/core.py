@@ -22,7 +22,7 @@ FLOOD_SUBDIR = "components/as_code/process_flood_detection"
 DLL_NAME = "flood_core.dll"
 EXE_NAME = "flood_sim.exe"
 STAMP_NAME = "floodsim.stamp"
-ABI_VERSION = 1
+ABI_VERSION = 2
 FRAME_W, FRAME_H = 1920, 1080
 MAX_BOXES = 32
 
@@ -192,7 +192,7 @@ class Core:
             f.argtypes = list(argtypes)
 
         for name in ("sim_abi_version", "sim_sizeof_box", "sim_sizeof_score", "sim_sizeof_result",
-                     "sim_upload_downscale"):
+                     "sim_upload_downscale", "sim_heartbeat_every"):
             fn(name, c_int32)
         for name in ("sim_submerged_below", "sim_veto_threshold", "sim_sample_period_s",
                      "sim_domain_x0", "sim_domain_x1"):
@@ -214,6 +214,7 @@ class Core:
         fn("sim_box_from_accelerator", None, c_float, c_float, c_float, c_float, c_float,
            c_int32, c_int32, c_int32, POINTER(_SimBox))
         fn("sim_score", c_int32, c_void_p, _U8P, POINTER(_SimBox), c_int32, POINTER(_SimScore))
+        fn("sim_band_coverage", c_float, POINTER(_SimBox))
         fn("sim_device_new", c_void_p)
         fn("sim_device_free", None, c_void_p)
         fn("sim_device_reset", None, c_void_p)
@@ -227,6 +228,12 @@ class Core:
     def veto_threshold(self) -> float: return self._lib.sim_veto_threshold()
     def sample_period_s(self) -> float: return self._lib.sim_sample_period_s()
     def upload_downscale(self) -> int: return self._lib.sim_upload_downscale()
+
+    def heartbeat_every(self) -> int: return self._lib.sim_heartbeat_every()
+
+    def band_coverage(self, box: Box) -> float:
+        b = _SimBox(box.x0, box.y0, box.x1, box.y1, box.confidence, box.cls)
+        return self._lib.sim_band_coverage(byref(b))
 
     # geometry
     def default_geometry(self) -> list[float]:

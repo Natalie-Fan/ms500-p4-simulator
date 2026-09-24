@@ -14,10 +14,16 @@ from tests.synth import CAR, dry_gray, flooded_gray
 
 
 def test_build_info_records_dll_and_firmware(build_info):
-    assert build_info["dll"]["abi"] == 1
+    assert build_info["dll"]["abi"] == core_mod.ABI_VERSION == 2
     assert build_info["dll"]["stale"] is False
     assert Path(build_info["firmware"]["dir"]).name == "NETWORK_P4_FLOOD_DETECTION"
     assert "commit" in build_info["firmware"] and "dirty" in build_info["firmware"]
+
+
+def test_band_coverage_and_heartbeat(core):
+    assert core.band_coverage(CAR) == 1.0
+    assert core.band_coverage(Box(0.0, 900.0, 1919.0, 1079.0, 0.9, 2)) == 0.0
+    assert core.heartbeat_every() == 60
 
 
 def test_rgb_to_gray_matches_firmware_formula(core):

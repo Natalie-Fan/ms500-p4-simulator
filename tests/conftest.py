@@ -1,3 +1,7 @@
+import os
+
+os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")   # Qt tests run without a display
+
 import pytest
 
 from floodsim.core import load_core

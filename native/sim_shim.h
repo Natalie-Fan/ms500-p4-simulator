@@ -12,7 +12,7 @@
 #define SIM_API
 #endif
 
-#define SIM_ABI_VERSION        1
+#define SIM_ABI_VERSION        2
 #define SIM_FRAME_W            1920
 #define SIM_FRAME_H            1080
 #define SIM_MAX_BOXES          32     /* FLOOD_VETO_MAX_BOXES */
@@ -94,6 +94,8 @@ SIM_API void    sim_box_from_accelerator(float x0, float y0, float x1, float y1,
                                          sim_box_t *out);
 SIM_API int32_t sim_score(const void *ref, const uint8_t *gray, const sim_box_t *boxes,
                           int32_t n_boxes, sim_score_t *out);
+SIM_API float   sim_band_coverage(const sim_box_t *box);
+SIM_API int32_t sim_heartbeat_every(void);
 
 /* ---- device loop (Task 2) ---- */
 SIM_API void *sim_device_new(void);

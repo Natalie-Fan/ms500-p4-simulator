@@ -201,6 +201,15 @@ static void test_device(void)
     sim_ref_free(ref);
 }
 
+static void test_band_coverage(void)
+{
+    const sim_box_t road = { 0.0f, 900.0f, 1919.0f, 1079.0f, 0.9f, 2 };  /* below the lane line */
+    CHECK(sim_band_coverage(&k_car) == 1.0f);
+    CHECK(sim_band_coverage(&road) == 0.0f);
+    CHECK(sim_band_coverage(NULL) == 0.0f);
+    CHECK(sim_heartbeat_every() == 60);
+}
+
 int main(void)
 {
     g_dry = malloc((size_t)SYNTH_W * SYNTH_H);
@@ -215,6 +224,7 @@ int main(void)
     test_strip_outline();
     test_reference_and_score();
     test_device();
+    test_band_coverage();
 
     free(g_dry);
     free(g_flood);

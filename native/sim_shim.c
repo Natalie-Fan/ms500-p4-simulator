@@ -227,6 +227,17 @@ void sim_box_from_accelerator(float x0, float y0, float x1, float y1, float conf
     out->cls = (int32_t)b.cls;
 }
 
+/* Fraction of the kerb line this one box hides (firmware flood_band_coverage);
+ * the GUI shows it on each box. */
+float sim_band_coverage(const sim_box_t *box)
+{
+    if (!box) return 0.0f;
+    const flood_box_t b = to_flood_box(box);
+    return flood_band_coverage(&b);
+}
+
+int32_t sim_heartbeat_every(void) { return FLOOD_HEARTBEAT_EVERY; }
+
 /* Dense scoring: the two firmware stages on one frame, no capture state. */
 int32_t sim_score(const void *ref, const uint8_t *gray, const sim_box_t *boxes,
                   int32_t n_boxes, sim_score_t *out)
