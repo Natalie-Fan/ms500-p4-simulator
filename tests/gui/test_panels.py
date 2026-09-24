@@ -1,0 +1,75 @@
+from floodsim.gui.frame_view import Tool
+from floodsim.gui.panels import SamplesTable, ToolsPanel, VerdictPanel
+from floodsim.gui.session import RefStatus
+from floodsim.results import ScoreResult
+
+ROW = {"sample": 3, "t_sec": 60.0, "frame_idx": 2, "outcome": "upload", "frames_taken": 1,
+       "has_reading": True, "curb_correlation": 0.21, "severity": "severe", "shift_dx": -3,
+       "shift_dy": 1, "veto_usable": True, "veto_coverage": 0.04, "veto_worst_class": "car",
+       "since_image": 0, "label": None}
+
+
+def test_verdict_device_row(qtbot):
+    p = VerdictPanel()
+    qtbot.addWidget(p)
+    p.show_device(ROW, 0.45)
+    assert p.outcome_label.text() == "UPLOAD"
+    assert p.corr_label.text() == "0.210 (threshold 0.45)"
+    assert p.veto_label.text() == "usable, coverage 4% (car)"
+    assert p.shift_label.text() == "dx -3  dy +1"
+    assert p.source_label.text() == "device sample #3 at 60.00 s"
+
+
+def test_verdict_score_and_no_reading(qtbot):
+    p = VerdictPanel()
+    qtbot.addWidget(p)
+    p.show_score(ScoreResult(False, 1.0, "car", 1.0, False, "none", 0, 0), "DRY", 0.45)
+    assert p.outcome_label.text() == "VETOED" and p.label_label.text() == "DRY"
+    p.show_score(None, None, 0.45)
+    assert p.outcome_label.text() == "no score" and p.corr_label.text() == "–"
+    p.show_device(dict(ROW, outcome="blocked", has_reading=False), 0.45)
+    assert p.corr_label.text() == "– (no reading)"
+
+
+def test_stale_banner(qtbot):
+    p = VerdictPanel()
+    qtbot.addWidget(p)
+    p.show_reference(RefStatus(True, True, "frame 0 (0.00 s)", 2, 1))
+    assert not p.stale_banner.isHidden() and "v1" in p.stale_text.text()
+    p.show_reference(RefStatus(True, False, "frame 0 (0.00 s)", 2, 2))
+    assert p.stale_banner.isHidden()
+    p.show_reference(RefStatus(False, False, "none", 0, None))
+    assert p.reference_label.text().startswith("none")
+
+
+def test_firmware_label(qtbot):
+    p = VerdictPanel()
+    qtbot.addWidget(p)
+    p.show_firmware({"commit": "7c9bed2abcdef", "dirty": False})
+    assert p.firmware_label.text() == "7c9bed2 (clean)"
+
+
+def test_tools_enable_and_signal(qtbot):
+    t = ToolsPanel()
+    qtbot.addWidget(t)
+    t.set_actions_enabled(True, False)
+    assert t.sample_btn.isEnabled() and t.set_reference_btn.isEnabled() and not t.score_btn.isEnabled()
+    with qtbot.waitSignal(t.toolChanged) as b:
+        t.tool_buttons[Tool.DRAW_BOX].click()
+    assert b.args == [Tool.DRAW_BOX]
+
+
+def test_samples_table(qtbot):
+    s = SamplesTable()
+    qtbot.addWidget(s)
+    s.set_rows([ROW], "device")
+    s.add_row(dict(ROW, sample=4, frame_idx=-1, outcome="blocked"), "device")
+    assert s.rowCount() == 2 and s.item(0, 3).text() == "upload" and s.item(0, 4).text() == "0.210000"
+    with qtbot.waitSignal(s.frameRequested) as b:
+        s.cellDoubleClicked.emit(0, 0)
+    assert b.args == [2]
+    with qtbot.assertNotEmitted(s.frameRequested):
+        s.cellDoubleClicked.emit(1, 0)   # frame_idx -1
+    s.add_row({"frame_idx": 5, "t_sec": 1.0, "submerged": True, "curb_correlation": 0.1,
+               "severity": "minor", "veto_usable": True, "veto_coverage": 0.0}, "dense")
+    assert s.rowCount() == 1   # switching mode resets the table
