@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "floodsim"
+version = "0.1.0"
+description = "Run the MS500-P4 flood-detection firmware code on image and video files"
+requires-python = ">=3.11"
+dependencies = ["numpy>=1.26", "opencv-python>=4.9"]
+
+[project.optional-dependencies]
+yolo = ["ultralytics>=8.3"]
+dev = ["pytest>=8"]
+
+[project.scripts]
+floodsim = "floodsim.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["floodsim*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
