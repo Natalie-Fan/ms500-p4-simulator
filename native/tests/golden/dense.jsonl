@@ -1,0 +1,6 @@
+{"mode":"dense","frame_idx":0,"t_sec":0.000,"veto_usable":true,"veto_coverage":0.000000,"veto_worst_class":"other","curb_correlation":1.000000,"submerged":false,"severity":"none","shift_dx":0,"shift_dy":0}
+{"mode":"dense","frame_idx":1,"t_sec":1.000,"veto_usable":true,"veto_coverage":0.000000,"veto_worst_class":"other","curb_correlation":1.000000,"submerged":false,"severity":"none","shift_dx":0,"shift_dy":0}
+{"mode":"dense","frame_idx":2,"t_sec":60.000,"veto_usable":true,"veto_coverage":0.000000,"veto_worst_class":"other","curb_correlation":0.000000,"submerged":true,"severity":"moderate","shift_dx":0,"shift_dy":0}
+{"mode":"dense","frame_idx":3,"t_sec":61.000,"veto_usable":true,"veto_coverage":0.000000,"veto_worst_class":"other","curb_correlation":0.000000,"submerged":true,"severity":"moderate","shift_dx":0,"shift_dy":0}
+{"mode":"dense","frame_idx":4,"t_sec":120.000,"veto_usable":false,"veto_coverage":1.000000,"veto_worst_class":"car","curb_correlation":1.000000,"submerged":false,"severity":"none","shift_dx":0,"shift_dy":0}
+{"mode":"dense","frame_idx":5,"t_sec":121.000,"veto_usable":true,"veto_coverage":0.000000,"veto_worst_class":"other","curb_correlation":1.000000,"submerged":false,"severity":"none","shift_dx":0,"shift_dy":0}

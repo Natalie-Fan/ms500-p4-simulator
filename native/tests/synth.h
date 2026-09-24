@@ -3,8 +3,8 @@
  * frame with rows [SYNTH_FLOOD_Y0, SYNTH_FLOOD_Y1) set to a constant -- the
  * whole kerb strip (y ~200..300 under the default geometry) loses its
  * structure, while the alignment patch (y 0..190) is untouched. */
-#ifndef SYNTH_H
-#define SYNTH_H
+#ifndef SYNTH_H_INCLUDED
+#define SYNTH_H_INCLUDED
 
 #include <stdint.h>
 
