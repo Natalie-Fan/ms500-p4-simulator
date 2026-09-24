@@ -4,6 +4,7 @@ Runs the MS500-P4 firmware's flood-detection C code — unmodified, compiled str
 `D:\git\NETWORK_P4_FLOOD_DETECTION` — on image and video files instead of the camera.
 
 Design: `docs/superpowers/specs/2026-09-24-flood-simulator-design.md`.
+**How to use it:** [`docs/HANDBOOK.md`](docs/HANDBOOK.md).
 
 ## Setup (Windows, Git Bash)
 
