@@ -5,17 +5,15 @@ import argparse
 import datetime as dt
 import logging
 import sys
-from dataclasses import asdict
 from pathlib import Path
 
-from . import __version__
 from .boxes import DEFAULT_CONF, DEFAULT_MODEL, make_box_provider, write_boxes_csv
 from .core import load_core
 from .errors import FloodSimError
 from .geometry import Geometry, load_geometry
 from .labels import Labels, score_rows
 from .modes import RunParams, UploadWriter, run_dense, run_device
-from .report import compare_runs, prepare_out_dir, summarize, write_run
+from .report import compare_runs, make_run_info, prepare_out_dir, summarize, write_run
 from .results import DENSE_FIELDS, DEVICE_FIELDS
 from .source import Normalizer, open_source, read_image_bgr, write_image
 
@@ -137,12 +135,9 @@ def cmd_run(args) -> int:
         fields.append("label")
         score = score_rows(result.rows, args.mode)
 
-    run_info = {
-        "floodsim": __version__, "created": dt.datetime.now().isoformat(timespec="seconds"),
-        "input": {"path": str(args.input), **source.fingerprint()}, "mode": args.mode, "params": asdict(params),
-        "geometry": geometry.to_json_dict(), "reference": ref_info, "boxes": boxes.description,
-        "labels": str(args.labels) if args.labels else None, **build_info,
-    }
+    run_info = make_run_info(source=source, mode=args.mode, params=params, geometry=geometry,
+                             reference=ref_info, boxes=boxes.description, labels=args.labels,
+                             build_info=build_info, input_path=args.input)
     write_run(out, run_info, result.rows, fields,
               summarize(result.rows, args.mode, result.decode_failures, score))
     print(f"wrote {out}")
