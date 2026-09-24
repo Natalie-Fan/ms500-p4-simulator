@@ -66,6 +66,12 @@ def build_parser() -> argparse.ArgumentParser:
     exp.add_argument("--every", type=int, default=1)
     exp.add_argument("--reference", type=Path, help="also write reference.pgm from this image")
     exp.add_argument("--no-rebuild", action="store_true")
+
+    gui = sub.add_parser("gui", help="open the GUI")
+    gui.add_argument("input", type=Path, nargs="?", help="image, folder of images, or video")
+    gui.add_argument("--fps", type=float)
+    gui.add_argument("--allow-stretch", action="store_true")
+    gui.add_argument("--no-detector", action="store_true", help="do not load YOLO (cached/edited boxes only)")
     return p
 
 
@@ -192,7 +198,15 @@ def cmd_export(args) -> int:
     return 0
 
 
-COMMANDS = {"run": cmd_run, "detect": cmd_detect, "compare": cmd_compare, "export": cmd_export}
+def cmd_gui(args) -> int:
+    try:
+        from .gui.app import run_gui
+    except ImportError as e:
+        raise FloodSimError("GUI dependencies missing: pip install -e .[gui]") from e
+    return run_gui(args.input, fps=args.fps, allow_stretch=args.allow_stretch, no_detector=args.no_detector)
+
+
+COMMANDS = {"run": cmd_run, "detect": cmd_detect, "compare": cmd_compare, "export": cmd_export, "gui": cmd_gui}
 
 
 def main(argv=None) -> int:

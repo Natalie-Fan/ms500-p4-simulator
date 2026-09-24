@@ -39,6 +39,26 @@ Without `ultralytics`, pass `--no-detector` (no obstruction veto) or have a comp
 Labels from the reference dataset:
 `python tools/truth_to_labels.py --truth ../MS500_Flooding_Detection/dataset/truth.csv --bursts ../MS500_Flooding_Detection/dataset/bursts.json --videos ../MS500_Flooding_Detection/Videos --out labels/`
 
+## GUI
+
+```bash
+.venv/Scripts/python -m pip install -e ".[dev,gui]"
+.venv/Scripts/floodsim gui clip.avi            # or an image, or a folder of images
+```
+
+Layout: tools (left) · frame with overlays (centre) · verdict and device state (right) ·
+correlation-over-time plot aligned with the scrubber (bottom; click it to jump) · samples table.
+
+- **Manual mode:** *Sample* runs the full firmware capture (retry on a frame 1 s later, heartbeat
+  counter carries over); *Score* scores this frame only; *Set reference* makes this frame the dry
+  reference; *Reset state* clears the heartbeat counter.
+- **Editing:** drag curb/lane endpoints (the reference is then marked stale, as on the device, until
+  you rebuild it); draw or delete obstruction boxes (saved to `<input>.boxes.edited.csv`, dashed).
+- **Batch:** Run ▸ Device/Dense runs the same runners as the CLI; File ▸ Export run writes the same
+  run folder as `floodsim run`.
+- All simulator calls run on one background thread; a long batch run delays frame updates until it
+  finishes or is cancelled.
+
 ## What is mirrored rather than compiled
 
 `native/device_constants.h` lists every value copied from firmware device glue (`flood_task.c`,

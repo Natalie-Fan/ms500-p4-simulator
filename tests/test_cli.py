@@ -97,3 +97,9 @@ def test_run_json_records_input_path(scenario):
     assert main(["run", str(folder), "--reference", str(ref), "--out", str(tmp / "rj")]) == 0
     info = json.loads((tmp / "rj" / "run.json").read_text())
     assert info["input"]["path"] == str(folder) and info["input"]["name"] == "clip"
+
+
+def test_gui_subcommand_is_registered():
+    from floodsim.cli import build_parser
+    args = build_parser().parse_args(["gui", "clip.avi", "--no-detector"])
+    assert args.command == "gui" and args.no_detector is True and str(args.input) == "clip.avi"
