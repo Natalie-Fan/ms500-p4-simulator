@@ -10,7 +10,7 @@ from .errors import FloodSimError
 from .labels import format_score
 
 _FLOAT6 = {"curb_correlation", "veto_coverage"}
-_CATEGORICAL = ("outcome", "severity", "submerged", "veto_usable")
+_CATEGORICAL = ("frame_idx", "outcome", "severity", "submerged", "veto_usable")
 
 
 def format_value(key: str, v) -> str:

@@ -113,3 +113,36 @@ def test_write_boxes_csv_for_exe(tmp_path):
     assert lines[1] == "frame_idx,t_sec,x0,y0,x1,y1,conf,coco_class,flood_class"
     assert lines[2] == "4,120.000,0,0,1919,1079,0.9,car,2"
     assert lines[3] == "5,121.000,,,,,,,"
+
+
+def test_cache_survives_different_path_spelling(core, tmp_path, monkeypatch):
+    from floodsim.source import open_source, write_image
+    img = tmp_path / "img.png"
+    write_image(img, RGB)
+    src = open_source(img)
+    store = BoxStore(src.path, cache_meta(src.fingerprint(), "fake.pt", 0.25))
+    store.put_detected(0, 0.0, [CachedBox(1, 2, 3, 4, 0.9, "car", 2)])
+    monkeypatch.chdir(tmp_path)
+    rel = open_source("img.png")
+    again = BoxStore(rel.path, cache_meta(rel.fingerprint(), "fake.pt", 0.25))
+    assert again.has_cache and again.get(0)[0].flood_class == 2
+
+
+def test_mismatched_cache_is_kept_aside(core, tmp_path):
+    prov, _, store = _provider(core, tmp_path, [Detection(10, 20, 30, 40, 0.8, "car")])
+    prov.boxes_for(0, 0.0, lambda: RGB)
+    old = store.cache_path.read_text()
+    _, _, store2 = _provider(core, tmp_path, [], meta=cache_meta(FINGERPRINT, "fake.pt", 0.5))
+    assert not store2.has_cache
+    assert (tmp_path / "clip.avi.boxes.csv.stale").read_text() == old
+
+
+def test_partly_written_frame_is_redetected(core, tmp_path):
+    two = [Detection(10, 20, 30, 40, 0.8, "car"), Detection(50, 60, 70, 80, 0.7, "person")]
+    prov, _, store = _provider(core, tmp_path, two)
+    prov.boxes_for(1, 0.25, lambda: RGB)
+    text = store.cache_path.read_text()
+    store.cache_path.write_text(text[: text.rstrip("\n").rfind(",")])  # second box row cut
+    prov2, det2, store2 = _provider(core, tmp_path, [])
+    assert store2.get(1) is None
+    assert prov2.boxes_for(1, 0.25, lambda: RGB) == [] and det2.calls == 1

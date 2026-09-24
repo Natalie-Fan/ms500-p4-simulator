@@ -56,3 +56,13 @@ def test_compare_reads_jsonl(tmp_path):
                  '"veto_worst_class":"other","curb_correlation":1.000000,"submerged":false,'
                  '"severity":"none","shift_dx":0,"shift_dy":0}\n')
     assert compare_runs(a, j) == []
+
+
+def test_compare_reports_frame_choice(tmp_path):
+    a, b = tmp_path / "a.csv", tmp_path / "b.csv"
+    fields = ["sample", "t_sec", "frame_idx", "outcome", "severity", "curb_correlation"]
+    row = {"sample": 0, "t_sec": 0.0, "frame_idx": 18011, "outcome": "clear", "severity": "none",
+           "curb_correlation": 0.9}
+    write_samples(a, [row], fields)
+    write_samples(b, [dict(row, frame_idx=18012)], fields)
+    assert any("frame_idx" in d for d in compare_runs(a, b))

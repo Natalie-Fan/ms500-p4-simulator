@@ -120,7 +120,7 @@ class ImageSequence(FrameSource):
 
     def fingerprint(self) -> dict:
         stats = [f.stat() for f in self._files]
-        return {"path": str(self.path), "n": self.n_frames,
+        return {"name": self.path.name, "n": self.n_frames,
                 "size": sum(s.st_size for s in stats), "mtime": max(s.st_mtime for s in stats)}
 
 
@@ -140,7 +140,9 @@ class VideoSource(FrameSource):
         if n == 0:
             raise FloodSimError(f"{path}: no decodable frames")
         self.n_frames = n
-        self._times = [i / fps for i in range(n)]
+        # Whole milliseconds: `floodsim export` names frames _t<ms> and flood_sim.exe
+        # reads times back from those names, so both must share this timeline.
+        self._times = [round(i * 1000 / fps) / 1000 for i in range(n)]
         self._cap.release()
         self._cap = self._open()
         self._pos = 0
@@ -180,7 +182,7 @@ class VideoSource(FrameSource):
 
     def fingerprint(self) -> dict:
         s = self.path.stat()
-        return {"path": str(self.path), "size": s.st_size, "mtime": s.st_mtime}
+        return {"name": self.path.name, "size": s.st_size, "mtime": s.st_mtime}
 
 
 def open_source(path: Path, *, fps: float | None = None, allow_stretch: bool = False) -> FrameSource:

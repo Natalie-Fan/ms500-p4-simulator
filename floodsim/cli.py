@@ -139,7 +139,7 @@ def cmd_run(args) -> int:
 
     run_info = {
         "floodsim": __version__, "created": dt.datetime.now().isoformat(timespec="seconds"),
-        "input": source.fingerprint(), "mode": args.mode, "params": asdict(params),
+        "input": {"path": str(args.input), **source.fingerprint()}, "mode": args.mode, "params": asdict(params),
         "geometry": geometry.to_json_dict(), "reference": ref_info, "boxes": boxes.description,
         "labels": str(args.labels) if args.labels else None, **build_info,
     }

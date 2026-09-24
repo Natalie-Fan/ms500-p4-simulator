@@ -73,3 +73,11 @@ def test_dense_veto_is_abstention():
             {"veto_usable": True, "submerged": True, "curb_correlation": 0.1, "label": "FLOODED"}]
     s = score_rows(rows, "dense")
     assert s["abstained"] == 1 and s["tp"] == 1 and s["fp"] == 0
+
+
+def test_blank_excel_rows_are_ignored(tmp_path):
+    labels = Labels.load(_write(tmp_path, "start_sec,end_sec,label\r\n0,5,DRY\r\n,,\r\n,,\r\n",
+                                encoding="utf-8-sig"))
+    assert labels.intervals == [(0.0, 5.0, "DRY")]
+    files = Labels.load(_write(tmp_path, "file,label\na.png,WET\n,\n", name="f.csv"))
+    assert files.files == {"a.png": "WET"}

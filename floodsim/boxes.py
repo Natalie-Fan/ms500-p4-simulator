@@ -136,16 +136,25 @@ def _read_csv(path: Path) -> tuple[dict | None, dict[int, list[CachedBox]], dict
                 continue
             fields = next(csv.reader([line]))
             try:
-                if len(fields) != len(CSV_FIELDS):
+                last_idx = int(fields[0])
+            except ValueError:
+                last_idx = None
+            try:
+                if last_idx is None or len(fields) != len(CSV_FIELDS):
                     raise ValueError(f"{len(fields)} fields")
-                idx, t = int(fields[0]), float(fields[1])
+                idx, t = last_idx, float(fields[1])
                 boxes = rows.setdefault(idx, [])
                 times[idx] = t
                 if fields[2] != "":
                     x0, y0, x1, y1, conf = (float(v) for v in fields[2:7])
                     boxes.append(CachedBox(x0, y0, x1, y1, conf, fields[7], int(fields[8])))
             except ValueError as e:
-                log.warning("%s:%d: skipping malformed box row (%s)", path, line_no, e)
+                # Appends are sequential, so an unparseable index means the last frame.
+                bad = last_idx if last_idx is not None else next(reversed(rows), None)
+                rows.pop(bad, None)
+                times.pop(bad, None)
+                log.warning("%s:%d: malformed box row (%s); frame %s will be re-detected",
+                            path, line_no, e, bad)
     return meta, rows, times
 
 
@@ -164,8 +173,11 @@ class BoxStore:
             if file_meta == json.loads(json.dumps(meta)):
                 self._cache = rows
             else:
-                log.warning("%s was made with different settings; discarding it", self.cache_path)
-                write_boxes_csv(self.cache_path, [], meta)
+                # Never destroy detection work: set the old cache aside, start a new one.
+                stale = Path(f"{self.cache_path}.stale")
+                self.cache_path.replace(stale)
+                log.warning("%s was made with different settings; moved it to %s",
+                            self.cache_path, stale)
         if self.edited_path.exists():
             _, self._edited, self._edited_times = _read_csv(self.edited_path)
 

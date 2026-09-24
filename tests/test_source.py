@@ -82,3 +82,17 @@ def test_non_ascii_folder(tmp_path):
     folder = write_frame_folder(tmp_path / "测试 clips", [(0, dry_gray())])
     src = open_source(folder)
     assert src.read_rgb(0) is not None
+
+
+def test_video_times_are_whole_milliseconds(tmp_path):
+    # flood_sim.exe reads times back from f<idx>_t<ms> names; both sides must share one timeline.
+    path = tmp_path / "ntsc.avi"
+    writer = cv2.VideoWriter(str(path), cv2.VideoWriter_fourcc(*"MJPG"), 30000 / 1001, (640, 360))
+    for _ in range(4):
+        writer.write(np.zeros((360, 640, 3), np.uint8))
+    writer.release()
+    src = open_source(path)
+    for i in range(src.n_frames):
+        t = src.timestamp(i)
+        assert t == round(t * 1000) / 1000
+    assert src.timestamp(1) == 0.033

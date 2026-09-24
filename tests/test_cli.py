@@ -89,3 +89,11 @@ def test_no_detector_ignores_cache(scenario):
     assert main(["run", str(folder), "--reference", str(ref), "--no-detector", "--out", str(tmp / "nd")]) == 0
     rows = read_samples(tmp / "nd")
     assert rows[2]["frames_taken"] == "1"   # no car box, so no retry at 120 s
+
+
+def test_run_json_records_input_path(scenario):
+    import json
+    folder, ref, tmp = scenario
+    assert main(["run", str(folder), "--reference", str(ref), "--out", str(tmp / "rj")]) == 0
+    info = json.loads((tmp / "rj" / "run.json").read_text())
+    assert info["input"]["path"] == str(folder) and info["input"]["name"] == "clip"

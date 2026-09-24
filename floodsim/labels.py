@@ -30,6 +30,7 @@ class Labels:
         reader = csv.DictReader(io.StringIO(text))
         fields = {f.strip() for f in reader.fieldnames or []}
         rows = [{(k or "").strip(): (v or "").strip() for k, v in r.items()} for r in reader]
+        rows = [r for r in rows if any(r.values())]   # Excel leaves ",," rows behind
         if {"start_sec", "end_sec", "label"} <= fields:
             try:
                 intervals = sorted((float(r["start_sec"]), float(r["end_sec"]), _label(r["label"], path))
