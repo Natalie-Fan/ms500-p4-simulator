@@ -358,7 +358,8 @@ class MainWindow(QMainWindow):
     def _save_geometry(self) -> None:
         path, _ = QFileDialog.getSaveFileName(self, "Save geometry", "geometry.json", "JSON (*.json)")
         if path:
-            self.worker.submit(lambda: self.session.geometry, lambda g: save_geometry(g, Path(path)))
+            self.worker.submit(lambda: save_geometry(self.session.geometry, Path(path)),
+                               lambda _: self.statusBar().showMessage(f"saved {path}", 5000))
 
     def _reset_geometry(self) -> None:
         self.worker.submit(self.session.default_geometry, self._apply_geometry)

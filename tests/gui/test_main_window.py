@@ -131,3 +131,22 @@ def test_undecodable_frame_blanks_view(qtbot, tmp_path, window):
     assert window._last_frame.rgb is None
     assert window.frame_view._pixmap.pixmap().isNull()
     assert window.last_error is None
+
+
+def test_save_geometry_error_is_shown(qtbot, tmp_path, window, monkeypatch):
+    bad_path = str(tmp_path / "missing" / "geo.json")
+    monkeypatch.setattr(mw.QFileDialog, "getSaveFileName", lambda *a, **k: (bad_path, ""))
+    window._save_geometry()
+    qtbot.waitUntil(lambda: window.last_error is not None, timeout=T)
+    assert "FileNotFoundError" in window.last_error or "No such file" in window.last_error
+
+
+def test_save_geometry_writes_current_geometry(qtbot, tmp_path, window, core, monkeypatch):
+    from floodsim.geometry import Geometry, load_geometry
+
+    out_path = tmp_path / "geo.json"
+    monkeypatch.setattr(mw.QFileDialog, "getSaveFileName", lambda *a, **k: (str(out_path), ""))
+    window._save_geometry()
+    qtbot.waitUntil(lambda: out_path.exists(), timeout=T)
+    saved = load_geometry(out_path)
+    assert saved == Geometry.from_list(core.default_geometry())
