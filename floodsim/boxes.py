@@ -185,6 +185,10 @@ class BoxStore:
     def has_cache(self) -> bool:
         return bool(self._cache)
 
+    @property
+    def has_edits(self) -> bool:
+        return bool(self._edited)
+
     def get(self, idx: int) -> list[CachedBox] | None:
         if idx in self._edited:
             return self._edited[idx]

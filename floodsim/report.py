@@ -94,8 +94,11 @@ def prepare_out_dir(out: Path) -> Path:
     return out
 
 
-def summarize(rows: list[dict], mode: str, decode_failures: int, score: dict | None) -> str:
+def summarize(rows: list[dict], mode: str, decode_failures: int, score: dict | None,
+              cancelled: bool = False) -> str:
     lines = [f"mode: {mode}", f"rows: {len(rows)}", f"failed frame reads: {decode_failures}"]
+    if cancelled:
+        lines.append("run cancelled: partial results")
     if mode == "device":
         counts = Counter(r["outcome"] for r in rows)
         for name in ("upload", "clear", "blocked", "heartbeat", "skipped_no_ref"):

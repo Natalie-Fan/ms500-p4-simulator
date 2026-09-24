@@ -80,3 +80,19 @@ def test_close_during_run_cancels(qtbot, tmp_path, window):
     started = time.monotonic()
     window.close()
     assert time.monotonic() - started < 2.0
+
+
+def test_run_status_reports_rebuild_and_missing_boxes(qtbot, tmp_path, window):
+    from floodsim.geometry import Geometry
+
+    folder = write_frame_folder(tmp_path / "clip", [(0, dry_gray()), (60000, flooded_gray())])
+    _ready(qtbot, window, folder)
+    g = window.session.geometry.to_list()
+    g[1] = 240.0
+    window._apply_geometry(Geometry.from_list(g))
+    qtbot.waitUntil(lambda: not window.verdict.stale_banner.isHidden(), timeout=T)
+    window._start_run("dense")
+    qtbot.waitUntil(lambda: window.samples.rowCount() == 2, timeout=T)
+    message = window.statusBar().currentMessage()
+    assert "reference rebuilt" in message and "2 frame(s) had no boxes" in message
+    qtbot.waitUntil(lambda: window.verdict.stale_banner.isHidden(), timeout=T)

@@ -2,6 +2,7 @@ import numpy as np
 import pytest
 from PySide6.QtCore import QPointF
 
+from floodsim.errors import FloodSimError
 from floodsim.gui import main_window as mw
 from floodsim.gui.frame_view import Tool
 from floodsim.gui.main_window import MainWindow
@@ -150,3 +151,54 @@ def test_save_geometry_writes_current_geometry(qtbot, tmp_path, window, core, mo
     qtbot.waitUntil(lambda: out_path.exists(), timeout=T)
     saved = load_geometry(out_path)
     assert saved == Geometry.from_list(core.default_geometry())
+
+
+def test_reopen_stops_playback(qtbot, tmp_path, window):
+    a = write_frame_folder(tmp_path / "a", [(i * 1000, dry_gray()) for i in range(6)])
+    b = write_frame_folder(tmp_path / "b", [(i * 1000, dry_gray()) for i in range(6)])
+    _open(qtbot, window, a)
+    window.timeline.set_playing(True)
+    window.open_path(b)
+    qtbot.waitUntil(lambda: window.windowTitle() == "floodsim: b", timeout=T)
+    assert not window.timeline.play_btn.isChecked()
+    assert not window._play.isActive()
+
+
+def test_frame_error_during_playback_stops_once(qtbot, tmp_path, window, monkeypatch):
+    folder = write_frame_folder(tmp_path / "clip", [(i * 1000, dry_gray()) for i in range(3)])
+    _open(qtbot, window, folder)
+    real = window.session.frame
+
+    def frame(idx, **kw):
+        if idx == 1:
+            raise FloodSimError("frame 1 is not 16:9")
+        return real(idx, **kw)
+
+    monkeypatch.setattr(window.session, "frame", frame)
+    errors = []
+    monkeypatch.setattr(window, "_show_error", errors.append)
+    window.timeline.set_playing(True)
+    qtbot.waitUntil(lambda: not window.timeline.play_btn.isChecked(), timeout=3000)
+    qtbot.wait(500)
+    assert window._current == 1 and window.timeline.slider.value() == 1
+    assert window.frame_view._pixmap.pixmap().isNull()
+    assert errors == ["frame 1 is not 16:9"]
+
+
+def test_box_drawn_during_playback_lands_on_its_frame(qtbot, tmp_path, window, monkeypatch):
+    folder = write_frame_folder(tmp_path / "clip", [(0, dry_gray()), (1000, dry_gray())])
+    _open(qtbot, window, folder, no_detector=True)
+
+    def pick(*a, **k):
+        window._current = 1      # playback moved on while the dialog was open
+        return "car", True
+
+    monkeypatch.setattr(mw.QInputDialog, "getItem", pick)
+    window.frame_view.set_tool(Tool.DRAW_BOX)
+    fv = window.frame_view
+    fv._press(QPointF(0, 0))
+    fv._move(QPointF(1919, 1079))
+    fv._release(QPointF(1919, 1079))
+    store = window.session.boxes.store
+    qtbot.waitUntil(lambda: bool(store.is_edited(0) or store.is_edited(1)), timeout=T)
+    assert store.is_edited(0) and not store.is_edited(1)

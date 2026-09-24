@@ -13,8 +13,8 @@ from ..boxes import (DEFAULT_CONF, DEFAULT_MODEL, BoxProvider, BoxStore, CachedB
 from ..errors import FloodSimError
 from ..geometry import Geometry
 from ..labels import Labels, score_rows
-from ..modes import (FrameFeeder, RunParams, UploadWriter, device_row, run_dense, run_device,
-                     sample_device_at)
+from ..modes import (FrameFeeder, RunOutput, RunParams, UploadWriter, device_row, run_dense,
+                     run_device, sample_device_at)
 from ..report import make_run_info, prepare_out_dir, summarize, write_run
 from ..results import DENSE_FIELDS, DEVICE_FIELDS, ScoreResult
 from ..source import Normalizer, open_source, read_image_bgr
@@ -24,17 +24,30 @@ _SCORE_FIELDS = [f for f in DENSE_FIELDS if f not in ("frame_idx", "t_sec")]
 
 
 class LenientBoxes:
-    """The GUI's box provider: a frame the cache lacks, with no detector, just has no boxes."""
+    """The GUI's box provider: a frame the cache lacks, with no detector, just has no boxes.
+    Such frames are counted in `missing_frames` so a run can say so."""
 
     def __init__(self, inner: BoxProvider):
         self.inner = inner
         self.store = inner.store
-        self.description = inner.description
+        self.missing_frames: set[int] = set()
+
+    @property
+    def description(self) -> dict:
+        d = dict(self.inner.description)
+        if self.inner.detector is None and not self.store.has_cache:
+            d = {"kind": "none"}
+        if self.store.has_edits:
+            d["edited_file"] = str(self.store.edited_path)
+        else:
+            d.pop("edited_file", None)
+        return d
 
     def cached_for(self, idx, t, load_rgb) -> list[CachedBox]:
         try:
             return self.inner.cached_for(idx, t, load_rgb)
         except FloodSimError:
+            self.missing_frames.add(idx)
             return []
 
     def boxes_for(self, idx, t, load_rgb):
@@ -49,6 +62,16 @@ class FrameData:
     boxes: list          # (CachedBox, edited, band coverage)
     score: ScoreResult | None
     label: str | None
+
+
+@dataclass(frozen=True)
+class RunRecord:
+    """A finished batch run and the settings it ran under, for export."""
+    params: RunParams
+    output: RunOutput
+    geometry: Geometry
+    reference: dict
+    boxes: dict
 
 
 @dataclass(frozen=True)
@@ -76,7 +99,7 @@ class Session:
         self.device = core.new_device()
         self.dense_cache: dict[int, ScoreResult] = {}
         self.manual_rows: list[dict] = []
-        self.run: tuple[RunParams, object] | None = None
+        self.run: RunRecord | None = None
         self.labels: Labels | None = None
         self.labels_path: Path | None = None
 
@@ -108,8 +131,12 @@ class Session:
         if inner is None:
             meta = cache_meta(src.fingerprint(), DEFAULT_MODEL, DEFAULT_CONF)
             inner = BoxProvider(self.core, BoxStore(src.path, meta), None)
+        if self.ref_info["kind"] == "frame" and self.source is not None:
+            self.ref_info.setdefault("input", str(self.source.path))
         self.source = src
         self.boxes = LenientBoxes(inner)
+        self.labels = None
+        self.labels_path = None
         self.dense_cache.clear()
         self.manual_rows.clear()
         self.run = None
@@ -192,6 +219,8 @@ class Session:
         info = self.ref_info
         if info["kind"] == "frame":
             desc = f"frame {info['frame_idx']} ({info['t_sec']:.2f} s)"
+            if "input" in info:
+                desc += f" of {Path(info['input']).name}"
         else:
             desc = f"image {Path(info['path']).name}"
         return RefStatus(True, self.ref_version != self.geometry_version, desc,
@@ -244,18 +273,29 @@ class Session:
     # ---------------------------------------------------------------- runs
     def run_batch(self, params: RunParams, progress=None, cancel=None) -> dict:
         src = self._src()
+        if params.mode == "dense" and (self.reference is None or not self.reference.ready):
+            raise FloodSimError("dense runs need a dry reference")
+        # Headless runs use a reference built under the current geometry, as the CLI does.
+        rebuilt = self.reference is not None and self.ref_status().stale
+        if rebuilt:
+            self.rebuild_reference()
+        self.boxes.missing_frames.clear()
         if params.mode == "dense":
-            if self.reference is None or not self.reference.ready:
-                raise FloodSimError("dense runs need a dry reference")
             out = run_dense(self.core, src, self.boxes, self.reference, params, progress=progress, cancel=cancel)
             for r in out.rows:
                 self.dense_cache[r["frame_idx"]] = ScoreResult(**{k: r[k] for k in _SCORE_FIELDS})
         else:
             out = run_device(self.core, src, self.boxes, self.reference, params, progress=progress, cancel=cancel)
         self._label_rows(out.rows)
-        self.run = (params, out)
+        missing = len(self.boxes.missing_frames)
+        reference = dict(self.ref_info)
+        if self.reference is not None:
+            reference["rebuilt_for_run"] = rebuilt
+        self.run = RunRecord(params, out, self.geometry, reference,
+                             {**self.boxes.description, "frames_without_boxes": missing})
         return {"mode": params.mode, "rows": [dict(r) for r in out.rows],
-                "cancelled": out.cancelled, "decode_failures": out.decode_failures}
+                "cancelled": out.cancelled, "decode_failures": out.decode_failures,
+                "reference_rebuilt": rebuilt, "frames_without_boxes": missing}
 
     def label_spans(self) -> list[tuple[float, float, str]]:
         src = self.source
@@ -281,9 +321,8 @@ class Session:
         self._label_rows(self.manual_rows)
         run_rows = run_mode = None
         if self.run is not None:
-            params, out = self.run
-            self._label_rows(out.rows)
-            run_rows, run_mode = [dict(r) for r in out.rows], params.mode
+            self._label_rows(self.run.output.rows)
+            run_rows, run_mode = [dict(r) for r in self.run.output.rows], self.run.params.mode
         return {"spans": self.label_spans(), "warnings": list(self.labels.warnings),
                 "manual_rows": [dict(r) for r in self.manual_rows], "run_rows": run_rows,
                 "run_mode": run_mode}
@@ -292,7 +331,8 @@ class Session:
         if self.run is None:
             raise FloodSimError("run a device or dense pass first (Run menu)")
         src = self._src()
-        params, result = self.run
+        run = self.run
+        params, result = run.params, run.output
         out = prepare_out_dir(Path(out))
         fields = list(DEVICE_FIELDS if params.mode == "device" else DENSE_FIELDS)
         score = None
@@ -306,9 +346,11 @@ class Session:
                     rgb = src.read_rgb(row["frame_idx"])
                     if rgb is not None:
                         uploads.write(row["sample"], rgb)
-        info = make_run_info(source=src, mode=params.mode, params=params, geometry=self.geometry,
-                             reference=self.ref_info, boxes=self.boxes.description,
+        info = make_run_info(source=src, mode=params.mode, params=params, geometry=run.geometry,
+                             reference=run.reference, boxes=run.boxes,
                              labels=self.labels_path, build_info=self.build_info, input_path=src.path)
+        info["cancelled"] = result.cancelled
         write_run(out, info, result.rows, fields,
-                  summarize(result.rows, params.mode, result.decode_failures, score))
+                  summarize(result.rows, params.mode, result.decode_failures, score,
+                            cancelled=result.cancelled))
         return str(out)

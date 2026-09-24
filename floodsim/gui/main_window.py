@@ -74,6 +74,7 @@ class MainWindow(QMainWindow):
         self._loading = False
         self._diff = False
         self._last_frame = None
+        self._frame_failing = False
         self._overlay: dict | None = None
         self._dense_points: dict[int, tuple[float, float, bool]] = {}
         self._manual_rows: list[dict] = []
@@ -234,13 +235,19 @@ class MainWindow(QMainWindow):
                            self._on_opened, failed)
 
     def _on_opened(self, info: dict) -> None:
+        self.timeline.set_playing(False)
         self._n = info["n_frames"]
         self._current = 0
+        self._want = None
+        self._last_frame = None
         self._dense_points.clear()
         self._manual_rows = []
         self._run_device_rows = []
         self.timeline.set_times(info["times"])
+        self.timeline.set_labels([])
         self.samples.set_rows([], "device")
+        if self._overlay:
+            self.verdict.show_state(0, self._overlay["heartbeat_every"])
         self.detector_label.setText("YOLO: on" if info["detector"] else "YOLO: off (cached/edited boxes only)")
         self.setWindowTitle(f"floodsim: {info['name']}")
         self.statusBar().showMessage(f"{info['n_frames']} frame(s)", 5000)
@@ -261,10 +268,12 @@ class MainWindow(QMainWindow):
         idx, self._want = self._want, None
         self._loading = True
         diff = self._diff
-        self.worker.submit(lambda: self.session.frame(idx, diff=diff), self._on_frame, self._on_frame_error)
+        self.worker.submit(lambda: self.session.frame(idx, diff=diff), self._on_frame,
+                           lambda message: self._on_frame_error(idx, message))
 
     def _on_frame(self, fd) -> None:
         self._loading = False
+        self._frame_failing = False
         self._current = fd.idx
         self._last_frame = fd
         self.frame_view.set_image(fd.rgb)
@@ -280,9 +289,20 @@ class MainWindow(QMainWindow):
             self.statusBar().showMessage(f"frame {fd.idx} failed to decode", 5000)
         self._load_next()
 
-    def _on_frame_error(self, message: str) -> None:
+    def _on_frame_error(self, idx: int, message: str) -> None:
+        # Like a failed decode: land on the frame, blank, and stop playback.
         self._loading = False
-        self._show_error(message)
+        self.timeline.set_playing(False)
+        self._current = idx
+        self._last_frame = None
+        self.frame_view.set_image(None)
+        self.frame_view.set_boxes([])
+        self.frame_view.set_shift(None)
+        self.timeline.set_frame(idx)
+        self.statusBar().showMessage(f"frame {idx}: {message}", 5000)
+        if not self._frame_failing:     # one dialog per run of failing frames
+            self._frame_failing = True
+            self._show_error(message)
         self._load_next()
 
     def _update_plot(self) -> None:
@@ -371,20 +391,21 @@ class MainWindow(QMainWindow):
     def _on_box_drawn(self, rect: QRectF) -> None:
         if self._last_frame is None:
             return
+        self.timeline.set_playing(False)
+        idx, boxes = self._current, self._current_boxes()   # the dialog below runs a nested loop
         cls, ok = QInputDialog.getItem(self, "Box class", "Class:", BOX_CLASSES, 1, False)
         if not ok:
             return
         box = CachedBox(rect.left(), rect.top(), rect.right(), rect.bottom(), 1.0, cls, COCO_TO_FLOOD[cls])
-        self._save_boxes(self._current_boxes() + [box])
+        self._save_boxes(idx, boxes + [box])
 
     def _on_box_delete(self, index: int) -> None:
         boxes = self._current_boxes()
         if 0 <= index < len(boxes):
             del boxes[index]
-            self._save_boxes(boxes)
+            self._save_boxes(self._current, boxes)
 
-    def _save_boxes(self, boxes: list[CachedBox]) -> None:
-        idx = self._current
+    def _save_boxes(self, idx: int, boxes: list[CachedBox]) -> None:
         self.worker.submit(lambda: self.session.set_boxes(idx, boxes), lambda _: self._after_box_edit(idx))
 
     def _revert_boxes(self) -> None:
@@ -454,6 +475,10 @@ class MainWindow(QMainWindow):
     def _on_run_done(self, result: dict) -> None:
         self._end_run()
         rows = result["rows"]
+        if result["reference_rebuilt"]:     # scores from the stale reference no longer hold
+            self._dense_points.clear()
+            self._refresh_reference()
+            self.show_frame(self._current)
         if result["mode"] == "device":
             self._run_device_rows = rows
         else:
@@ -467,6 +492,11 @@ class MainWindow(QMainWindow):
             message += " (cancelled)"
         if result["decode_failures"]:
             message += f", {result['decode_failures']} failed frame reads"
+        if result["reference_rebuilt"]:
+            message += "; reference rebuilt under the current geometry"
+        if result["frames_without_boxes"]:
+            message += (f"; warning: {result['frames_without_boxes']} frame(s) had no boxes "
+                        "(not in the box cache, no detector)")
         self.statusBar().showMessage(message)
 
     def _on_run_failed(self, message: str) -> None:
