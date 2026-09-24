@@ -1,8 +1,9 @@
 import pytest
 from PySide6.QtCore import QPointF, QRectF
+from PySide6.QtWidgets import QGraphicsLineItem
 
 from floodsim.boxes import CachedBox
-from floodsim.gui.frame_view import FrameView, Tool
+from floodsim.gui.frame_view import FRAME_H, FrameView, Tool
 from tests.synth import dry_gray, to_rgb
 
 
@@ -11,7 +12,7 @@ def view(qtbot, core):
     v = FrameView()
     qtbot.addWidget(v)
     v.set_geometry_overlay({"geometry": core.default_geometry(), "strip": core.strip_outline(),
-                            "align": core.align_patch()})
+                            "align": core.align_patch(), "domain": core.domain()})
     return v
 
 
@@ -24,9 +25,18 @@ def _drag(v, a, b):
 def test_image_and_overlays_drawn(view):
     view.set_image(to_rgb(dry_gray()))
     assert not view._pixmap.pixmap().isNull()
-    assert len(view._overlay.childItems()) >= 3   # curb, lane, strip
+    assert len(view._overlay.childItems()) >= 5   # curb, lane, strip, 2 domain lines
     view.set_image(None)
     assert view._pixmap.pixmap().isNull()
+
+
+def test_domain_lines_at_domain_edges(view):
+    lines = [item for item in view._overlay.childItems() if isinstance(item, QGraphicsLineItem)]
+    vertical = [ln for ln in lines
+                if ln.line().x1() == ln.line().x2()
+                and ln.line().y1() == 0.0 and ln.line().y2() == float(FRAME_H)]
+    xs = sorted(ln.line().x1() for ln in vertical)
+    assert xs == [560.0, 1920.0]
 
 
 def test_drag_curb_endpoint_emits_geometry(qtbot, view):
@@ -82,4 +92,27 @@ def test_toggles_hide_overlays(view):
     before = len(view._overlay.childItems())
     view.toggles.strip = False
     view.redraw()
-    assert len(view._overlay.childItems()) == before - 1
+    assert len(view._overlay.childItems()) == before - 3   # strip polygon + 2 domain lines
+
+
+def test_tool_switch_cancels_curb_drag(qtbot, view):
+    view.set_tool(Tool.EDIT_CURB)
+    original = list(view._geometry)
+    view._press(QPointF(560, 230))
+    view._move(QPointF(600, 240))
+    view.set_tool(Tool.PAN)
+    with qtbot.assertNotEmitted(view.geometryEdited):
+        view._release(QPointF(600, 240))
+    assert view._geometry == original
+
+
+def test_tool_switch_cancels_rubber_band(qtbot, view):
+    view.set_tool(Tool.DRAW_BOX)
+    view._press(QPointF(300, 200))
+    view._move(QPointF(100, 100))
+    rubber = view._rubber
+    view.set_tool(Tool.PAN)
+    assert rubber not in view.scene().items()
+    with qtbot.assertNotEmitted(view.boxDrawn):
+        view._release(QPointF(100, 100))
+    assert view._rubber is None

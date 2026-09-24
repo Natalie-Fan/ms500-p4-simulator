@@ -81,9 +81,11 @@ class FrameView(QGraphicsView):
         self._geometry: list[float] | None = None
         self._strip = None
         self._align = None
+        self._domain: tuple[float, float] | None = None
         self._boxes: list = []
         self._shift: tuple[int, int] | None = None
         self._drag_endpoint: int | None = None
+        self._geometry_at_press: list[float] | None = None
         self._rubber_start: QPointF | None = None
         self._rubber: QGraphicsRectItem | None = None
         self._fit = True
@@ -104,6 +106,7 @@ class FrameView(QGraphicsView):
         self._geometry = [float(v) for v in overlay["geometry"]]
         self._strip = overlay["strip"]
         self._align = overlay["align"]
+        self._domain = overlay.get("domain")
         self.redraw()
 
     def set_boxes(self, boxes: list) -> None:
@@ -115,6 +118,15 @@ class FrameView(QGraphicsView):
         self.redraw()
 
     def set_tool(self, tool: Tool) -> None:
+        if self._drag_endpoint is not None:
+            self._geometry = self._geometry_at_press
+            self._drag_endpoint = None
+            self._geometry_at_press = None
+        if self._rubber_start is not None or self._rubber is not None:
+            if self._rubber is not None:
+                self.scene().removeItem(self._rubber)
+            self._rubber = None
+            self._rubber_start = None
         self.tool = tool
         self.setDragMode(QGraphicsView.ScrollHandDrag if tool is Tool.PAN else QGraphicsView.NoDrag)
         self.redraw()
@@ -140,6 +152,11 @@ class FrameView(QGraphicsView):
             strip = QGraphicsPolygonItem(QPolygonF(pts))
             strip.setPen(_pen(STRIP_COLOR, 1.5, dashed=True))
             group.addToGroup(strip)
+        if self.toggles.strip and self._domain is not None:
+            for x in self._domain:
+                line = QGraphicsLineItem(x, 0, x, FRAME_H)
+                line.setPen(_pen(STRIP_COLOR, 1.0, dashed=True))
+                group.addToGroup(line)
         if self.toggles.align and self._align:
             x0, y0, x1, y1 = self._align
             rect = QGraphicsRectItem(QRectF(x0, y0, x1 - x0, y1 - y0))
@@ -187,6 +204,7 @@ class FrameView(QGraphicsView):
             for k in self._active_endpoints():
                 x, y = self._geometry[2 * k], self._geometry[2 * k + 1]
                 if (p.x() - x) ** 2 + (p.y() - y) ** 2 <= GRAB_RADIUS ** 2:
+                    self._geometry_at_press = list(self._geometry)
                     self._drag_endpoint = k
                     return True
             return False
