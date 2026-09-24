@@ -84,8 +84,9 @@ class RefStatus:
 
 
 class Session:
-    def __init__(self, core, build_info: dict):
+    def __init__(self, core, build_info: dict, model: str = DEFAULT_MODEL):
         self.core = core
+        self.model = model
         self.build_info = build_info
         self.source = None
         self.boxes: LenientBoxes | None = None
@@ -125,11 +126,11 @@ class Session:
         inner = None
         if not no_detector:
             try:
-                inner = make_box_provider(self.core, src, no_detector=False)
+                inner = make_box_provider(self.core, src, no_detector=False, model=self.model)
             except FloodSimError as e:
                 log.warning("%s", e)
         if inner is None:
-            meta = cache_meta(src.fingerprint(), DEFAULT_MODEL, DEFAULT_CONF)
+            meta = cache_meta(src.fingerprint(), self.model, DEFAULT_CONF)
             inner = BoxProvider(self.core, BoxStore(src.path, meta), None)
         if self.ref_info["kind"] == "frame" and self.source is not None:
             self.ref_info.setdefault("input", str(self.source.path))

@@ -49,9 +49,11 @@ In Git Bash:
 cd /d/git/ms500-p4-simulator
 py -3.11 -m venv .venv
 .venv/Scripts/python -m pip install -e ".[dev,gui]"      # core + GUI + tests
-.venv/Scripts/python -m pip install -e ".[yolo]"         # optional: obstruction detector (~2 GB)
+.venv/Scripts/python -m pip install -e ".[onnx]"         # obstruction detector runtime (onnxruntime)
 ```
 
+- **Put the device's traffic model at `models/traffic.onnx`.** It is the obstruction detector
+  (not in git). Another model: pass `--model`; a `.pt` file runs through ultralytics (`[yolo]` extra).
 - **The first run compiles the firmware code automatically.** Output goes to `build/native/`
   (`flood_core.dll`, `flood_sim.exe`).
 - **Firmware checked out somewhere else?** Point the simulator at it:
@@ -133,7 +135,7 @@ The simulator accepts a **video**, a **single image**, or a **folder of images**
 .venv/Scripts/floodsim gui                    # empty window; open something from the File menu
 .venv/Scripts/floodsim gui clip.avi           # open a video straight away
 .venv/Scripts/floodsim gui frames/ --fps 4    # a folder without _t<ms> names
-.venv/Scripts/floodsim gui clip.avi --no-detector   # don't load YOLO (starts faster)
+.venv/Scripts/floodsim gui clip.avi --no-detector   # don't load the detector (starts faster)
 ```
 
 ### Layout
@@ -219,7 +221,7 @@ to the window.
 
 ### Obstruction boxes
 
-- **With YOLO installed:** boxes are detected on each frame you visit and cached next to the
+- **With the detector available:** boxes are detected on each frame you visit and cached next to the
   input.
 - **Draw box:** drag a rectangle, then pick a class (person, car, truck, bus, bicycle,
   motorcycle).
@@ -227,7 +229,7 @@ to the window.
 - **Where edits go:** `<input>.boxes.edited.csv`. They override detected boxes for that frame and
   show dashed.
 - **Boxes ▸ Revert frame to detector boxes** removes your edits for the current frame.
-- **Without YOLO** (status bar: *YOLO: off*): only cached and edited boxes exist. Frames with
+- **Without it** (status bar: *Detector: off*): only cached and edited boxes exist. Frames with
   neither have no boxes, so the veto can never trigger on them.
 
 ### Batch runs
@@ -267,7 +269,7 @@ Use the command line for anything repeatable: evaluations, regression checks, sc
 floodsim run INPUT [--mode device|dense] (--reference IMG | --reference-at SECONDS)
                    [--geometry GEO.json] [--labels LABELS.csv] [--out DIR]
                    [--period 60] [--retry-gap 1] [--every 1]
-                   [--no-detector] [--model yolo26n.pt] [--conf 0.25]
+                   [--no-detector] [--model models/traffic.onnx] [--conf 0.5]
                    [--fps F] [--allow-stretch] [--no-rebuild]
 ```
 
@@ -281,7 +283,7 @@ floodsim run INPUT [--mode device|dense] (--reference IMG | --reference-at SECON
 | `--period`, `--retry-gap` | Device mode timing |
 | `--every` | Dense mode: score every Nth frame |
 | `--no-detector` | No obstruction boxes at all, including edited ones |
-| `--model`, `--conf` | YOLO model and confidence threshold |
+| `--model`, `--conf` | Detection model (`.onnx`: the device's traffic model; `.pt`: an ultralytics YOLO) and score threshold. The defaults match the device: `models/traffic.onnx`, 0.5, NMS 0.20 across classes, motorcycles dropped. |
 | `--no-rebuild` | Use the existing DLL even if the firmware changed. `run.json` then records `"stale": true`. |
 
 Examples:
@@ -300,11 +302,11 @@ floodsim run clip.avi --mode dense --reference dry.jpg --geometry site42.json --
 ### `floodsim detect`: fill the box cache in advance
 
 ```bash
-floodsim detect clip.avi [--every 1] [--model yolo26n.pt] [--conf 0.25]
+floodsim detect clip.avi [--every 1] [--model models/traffic.onnx] [--conf 0.5]
 ```
 
-This runs YOLO once and saves the boxes to `clip.avi.boxes.csv`. Later runs reuse the cache,
-including on machines without YOLO installed. The cache belongs to the model, confidence, and
+This runs the detector once and saves the boxes to `clip.avi.boxes.csv`. Later runs reuse the cache,
+including on machines without the detector. The cache belongs to the model, confidence, NMS, and
 input file (name, size, modification time); if any of those change, it is set aside as
 `….boxes.csv.stale` and detection starts again.
 
@@ -349,7 +351,7 @@ floodsim compare out/some-python-run out/exe.jsonl        # expect 0 differences
 Options: `--reference R.pgm --frames DIR|LIST [--boxes B.csv] [--geometry G.json]
 [--mode device|dense] [--period 60] [--retry-gap 1] [--every 1] [--fps 1]`.
 It prints one JSON line per sample, with the same fields as `samples.csv`. It reads only 1920×1080
-PGM frames and does no video decoding and no YOLO. Keep its paths ASCII.
+PGM frames and does no video decoding and no detection. Keep its paths ASCII.
 
 ---
 
@@ -432,7 +434,7 @@ ignored:
 
 | File | Written by | Notes |
 |---|---|---|
-| `<input>.boxes.csv` | YOLO (`detect`, runs, GUI) | Cache. Starts with a `# meta:` line recording the model, confidence and input. Safe to delete. |
+| `<input>.boxes.csv` | Detector (`detect`, runs, GUI) | Cache. Starts with a `# meta:` line recording the model, confidence and input. Safe to delete. |
 | `<input>.boxes.edited.csv` | GUI box tools | Your edits. They override the cache for those frames. |
 | `<input>.boxes.csv.stale` | — | An older cache made with different settings, kept rather than deleted |
 
@@ -443,7 +445,7 @@ ignored:
 ### Evaluate the detector on a labelled clip
 
 ```bash
-floodsim detect clip.avi                                      # once, if YOLO is installed
+floodsim detect clip.avi                                      # once, if the detector is available
 floodsim run clip.avi --mode dense  --reference dry.jpg --labels clip.labels.csv --out out/clip-dense
 floodsim run clip.avi --mode device --reference dry.jpg --labels clip.labels.csv --out out/clip-device
 ```
@@ -505,7 +507,7 @@ numbers.
 |---|---|
 | `firmware flood sources not found under …` | Set `FLOOD_FIRMWARE_DIR` to the firmware repo. |
 | Build error mentioning `Permission denied` | Another simulator window has the DLL open. Close it. |
-| `ultralytics is not installed …` | Install the `[yolo]` extra, or use `--no-detector`, or run `floodsim detect` where YOLO is installed and copy the `.boxes.csv` over. |
+| `onnxruntime is not installed …` / `detection model not found …` | Install the `[onnx]` extra and put the model at `models/traffic.onnx` (or pass `--model`), or use `--no-detector`, or run `floodsim detect` elsewhere and copy the `.boxes.csv` over. |
 | `… is not 16:9, so the curb geometry would not line up` | The input is not 16:9. Use `--allow-stretch` only if you know the lines still fit. |
 | `image frames need --fps …` | The folder's file names have no `_t<ms>` part. Pass `--fps`. |
 | `dense mode needs --reference or --reference-at` | Give a dry reference. |
@@ -520,9 +522,10 @@ numbers.
 
 ## 11. Limits: where the simulator differs from the camera
 
-- **Obstruction detector.** On the camera it is the IMX500's on-chip model. Here it is YOLO on the
-  PC, resized to the same 640×480 input and scaled back with the firmware's own function. The boxes
-  are similar, not identical.
+- **Obstruction detector.** On the camera the traffic model runs on the IMX500 chip. Here the
+  same model (`models/traffic.onnx`) runs on the PC in float, with the firmware's decoding, 0.5
+  threshold, NMS 0.20 and motorcycle filter, on the whole frame squeezed to 416×416. The chip runs
+  a quantized build on its own crop of the sensor, so boxes and scores are close, not identical.
 - **Retry timing.** The simulator retries 1 s after the first frame. The camera simply takes the
   next frame. The simulator may therefore clear a passing vehicle more often than the camera does.
 - **First sample.** The simulator samples at t = 0, 60 s, 120 s…. The camera's first sample comes

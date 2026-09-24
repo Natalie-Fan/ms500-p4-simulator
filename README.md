@@ -12,7 +12,7 @@ Needs MinGW gcc, CMake ≥ 3.20, Ninja and Python 3.11 on PATH.
 
 ```bash
 py -3.11 -m venv .venv
-.venv/Scripts/python -m pip install -e ".[dev]"        # add ,yolo for Stage-1 detection (~2 GB)
+.venv/Scripts/python -m pip install -e ".[dev,onnx]"   # onnx: runs models/traffic.onnx (the device model)
 ```
 
 The native build runs automatically the first time `floodsim` loads the core, and again whenever a
@@ -34,7 +34,8 @@ build/native/flood_sim.exe --reference out/exp/reference.pgm --frames out/exp/fr
     --boxes out/exp/boxes.csv --mode dense
 ```
 
-Without `ultralytics`, pass `--no-detector` (no obstruction veto) or have a complete
+Stage-1 boxes come from the device's traffic model at `models/traffic.onnx` (not in git;
+copy it there). Without it or `onnxruntime`, pass `--no-detector` (no obstruction veto) or have a complete
 `<input>.boxes.csv` cache from an earlier `floodsim detect`.
 
 Labels from the reference dataset:

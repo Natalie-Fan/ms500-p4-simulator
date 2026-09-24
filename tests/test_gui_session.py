@@ -243,3 +243,10 @@ def test_gui_and_cli_runs_match(core, build_info, folder, tmp_path, mode):
     assert cli_main(["run", str(folder), "--mode", mode, "--reference", str(ref),
                      "--no-detector", "--out", str(cli_out)]) == 0
     assert read_samples(gui_out) and compare_runs(gui_out, cli_out) == []
+
+
+def test_session_uses_its_model_for_the_box_cache(core, build_info, folder):
+    s = Session(core, build_info, model="other.onnx")
+    s.open(folder, no_detector=True)
+    assert s.boxes.store.meta["model"] == "other.onnx"
+    assert s.boxes.store.meta["input"] == [416, 416]

@@ -1,7 +1,7 @@
 import pytest
 
-from floodsim.boxes import (BoxProvider, BoxStore, CachedBox, Detection, cache_meta,
-                            write_boxes_csv)
+from floodsim.boxes import (DEFAULT_CONF, DEFAULT_MODEL, DEFAULT_NMS, BoxProvider, BoxStore, CachedBox,
+                            Detection, cache_meta, write_boxes_csv)
 from floodsim.errors import FloodSimError
 from floodsim.results import Box
 from tests.synth import dry_gray, to_rgb
@@ -10,13 +10,14 @@ from tests.synth import dry_gray, to_rgb
 class FakeDetector:
     model_name = "fake.pt"
     conf = 0.25
+    shape = (480, 640, 3)
 
     def __init__(self, dets):
         self.dets = dets
         self.calls = 0
 
     def detect(self, rgb_small):
-        assert rgb_small.shape == (480, 640, 3)
+        assert rgb_small.shape == self.shape
         self.calls += 1
         return list(self.dets)
 
@@ -34,6 +35,33 @@ def _provider(core, tmp_path, dets, meta=None):
 def test_detector_boxes_scaled_to_frame(core, tmp_path):
     prov, det, _ = _provider(core, tmp_path, [Detection(10, 20, 30, 40, 0.8, "car")])
     assert prov.boxes_for(0, 0.0, lambda: RGB) == [Box(30.0, 45.0, 90.0, 90.0, pytest.approx(0.8), 2)]
+
+
+def test_device_detector_settings_are_the_defaults():
+    # inference_common.h: modelScoreThreshold 0.5 (CONFIG_DNN_TYPE_FLOOD), modelNMSThreshold 0.20
+    assert (DEFAULT_CONF, DEFAULT_NMS) == (0.5, 0.20)
+    assert DEFAULT_MODEL.replace("\\", "/").endswith("models/traffic.onnx")
+
+
+def test_cache_meta_records_nms_and_model_input():
+    assert cache_meta(FINGERPRINT, "fake.pt", 0.5)["nms"] == DEFAULT_NMS
+    assert cache_meta(FINGERPRINT, "fake.pt", 0.5)["input"] == [640, 480]
+    assert cache_meta(FINGERPRINT, "models/traffic.onnx", 0.5)["input"] == [416, 416]
+
+
+def test_onnx_model_sees_416_square_input(core, tmp_path):
+    det = FakeDetector([Detection(13, 26, 39, 52, 0.8, "car")])
+    det.model_name, det.shape = "traffic.onnx", (416, 416, 3)
+    store = BoxStore(tmp_path / "clip.avi", cache_meta(FINGERPRINT, det.model_name, det.conf))
+    [b] = BoxProvider(core, store, det).boxes_for(0, 0.0, lambda: RGB)
+    assert (b.x0, b.y0, b.x1, b.y1) == pytest.approx((60, 67.5, 180, 135))   # 416x416 -> 1920x1080
+
+
+def test_motorcycles_are_dropped(core, tmp_path):
+    # inference_yolo_traffic.cpp:167 discards class 3 before anything downstream sees it
+    prov, _, _ = _provider(core, tmp_path, [Detection(10, 20, 30, 40, 0.8, "motorcycle"),
+                                             Detection(10, 20, 30, 40, 0.8, "car")])
+    assert [b.cls for b in prov.boxes_for(0, 0.0, lambda: RGB)] == [2]
 
 
 def test_cache_reused_without_detector_call(core, tmp_path):

@@ -1,4 +1,4 @@
-"""Stage-1 boxes: YOLO on the PC standing in for the IMX500, with a per-frame cache."""
+"""Stage-1 boxes: the traffic model (or a YOLO) on the PC standing in for the IMX500, with a per-frame cache."""
 from __future__ import annotations
 
 import csv
@@ -17,9 +17,14 @@ from .results import Box
 
 log = logging.getLogger(__name__)
 
-DETECTOR_INPUT = (640, 480)   # IMX500 accelerator input (ms500/veto.py IMX500_INPUT)
-DEFAULT_MODEL = "yolo26n.pt"
-DEFAULT_CONF = 0.25
+YOLO_INPUT = (640, 480)   # IMX500 accelerator input (ms500/veto.py IMX500_INPUT)
+DEFAULT_MODEL = str(Path(__file__).resolve().parent.parent / "models" / "traffic.onnx")
+# The device's detector settings, components/as_code/process_common/inference_common.h:
+# modelScoreThreshold (0.5 with CONFIG_DNN_TYPE_FLOOD) and modelNMSThreshold.
+DEFAULT_CONF = 0.5
+DEFAULT_NMS = 0.20
+# inference_yolo_traffic.cpp:167 drops motorcycles before tracking, drawing or flood see them.
+DROPPED_CLASSES = {"motorcycle"}
 # COCO name -> flood_class_t. The firmware maps its traffic model's classes the
 # same way in map_traffic_class(), main/ai_process/flood_task.c:101-112.
 COCO_TO_FLOOD = {"person": 1, "car": 2, "truck": 3, "bus": 4, "bicycle": 5, "motorcycle": 6}
@@ -42,7 +47,7 @@ class CachedBox:
 
 @dataclass(frozen=True)
 class Detection:
-    """In detector-input (640x480) coordinates."""
+    """In detector-input coordinates (see detector_input())."""
     x0: float
     y0: float
     x1: float
@@ -72,7 +77,8 @@ class YoloDetector:
 
     def detect(self, rgb_small: np.ndarray) -> list[Detection]:
         out = self._model.predict(cv2.cvtColor(rgb_small, cv2.COLOR_RGB2BGR),
-                                  verbose=False, conf=self.conf)[0]
+                                  verbose=False, conf=self.conf, iou=DEFAULT_NMS,
+                                  agnostic_nms=True)[0]   # the firmware's NMS ignores class
         dets = []
         for b in out.boxes:
             x0, y0, x1, y1 = (float(v) for v in b.xyxy[0])
@@ -80,8 +86,21 @@ class YoloDetector:
         return dets
 
 
+def detector_input(model: str) -> tuple[int, int]:
+    from .traffic_onnx import INPUT_SIZE
+    return INPUT_SIZE if str(model).lower().endswith(".onnx") else YOLO_INPUT
+
+
+def make_detector(model: str, conf: float) -> Detector:
+    if str(model).lower().endswith(".onnx"):
+        from .traffic_onnx import OnnxTrafficDetector
+        return OnnxTrafficDetector(model, conf, DEFAULT_NMS)
+    return YoloDetector(model, conf)
+
+
 def cache_meta(fingerprint: dict, model: str, conf: float) -> dict:
-    return {"model": model, "conf": conf, "input": list(DETECTOR_INPUT), "source": fingerprint}
+    return {"model": model, "conf": conf, "nms": DEFAULT_NMS, "input": list(detector_input(model)),
+            "source": fingerprint}
 
 
 def _num(v: float) -> str:
@@ -250,15 +269,18 @@ class BoxProvider:
         if self.detector is None:
             raise FloodSimError(
                 f"frame {idx} is not in {self.store.cache_path} and no detector is available "
-                f"(install ultralytics or use --no-detector)")
+                f"(install the detector's runtime or use --no-detector)")
         rgb = load_rgb()
         if rgb is None:
             return []
-        small = cv2.resize(rgb, DETECTOR_INPUT, interpolation=cv2.INTER_AREA)
+        size = tuple(self.store.meta["input"])
+        small = cv2.resize(rgb, size, interpolation=cv2.INTER_AREA)
         got = []
         for d in self.detector.detect(small):
+            if d.coco_class in DROPPED_CLASSES:
+                continue
             fc = COCO_TO_FLOOD.get(d.coco_class, 0)
-            b = self.core.box_from_accelerator(d.x0, d.y0, d.x1, d.y1, d.conf, fc, *DETECTOR_INPUT)
+            b = self.core.box_from_accelerator(d.x0, d.y0, d.x1, d.y1, d.conf, fc, *size)
             # Round-trip through the cache's text form so a fresh detection and
             # its cached copy are the same Python values, not just the same float32.
             x0, y0, x1, y1, conf = (float(_num(v)) for v in (b.x0, b.y0, b.x1, b.y1, b.confidence))
@@ -276,10 +298,10 @@ def make_box_provider(core, source, *, no_detector: bool, model: str = DEFAULT_M
         return BoxProvider.none(core)
     store = BoxStore(source.path, cache_meta(source.fingerprint(), model, conf))
     try:
-        detector: Detector | None = YoloDetector(model, conf)
-    except FloodSimError:
+        detector: Detector | None = make_detector(model, conf)
+    except FloodSimError as e:
         if not store.has_cache:
             raise
-        log.warning("ultralytics not installed; using cached boxes from %s only", store.cache_path)
+        log.warning("%s; using cached boxes from %s only", e, store.cache_path)
         detector = None
     return BoxProvider(core, store, detector)

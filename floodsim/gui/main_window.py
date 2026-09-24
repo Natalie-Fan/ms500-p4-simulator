@@ -248,7 +248,7 @@ class MainWindow(QMainWindow):
         self.samples.set_rows([], "device")
         if self._overlay:
             self.verdict.show_state(0, self._overlay["heartbeat_every"])
-        self.detector_label.setText("YOLO: on" if info["detector"] else "YOLO: off (cached/edited boxes only)")
+        self.detector_label.setText("Detector: on" if info["detector"] else "Detector: off (cached/edited boxes only)")
         self.setWindowTitle(f"floodsim: {info['name']}")
         self.statusBar().showMessage(f"{info['n_frames']} frame(s)", 5000)
         self._refresh_reference()

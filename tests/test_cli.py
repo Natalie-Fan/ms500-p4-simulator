@@ -103,3 +103,9 @@ def test_gui_subcommand_is_registered():
     from floodsim.cli import build_parser
     args = build_parser().parse_args(["gui", "clip.avi", "--no-detector"])
     assert args.command == "gui" and args.no_detector is True and str(args.input) == "clip.avi"
+
+
+def test_gui_accepts_model():
+    from floodsim.cli import build_parser
+    args = build_parser().parse_args(["gui", "--model", "models/other.onnx"])
+    assert args.model == "models/other.onnx"

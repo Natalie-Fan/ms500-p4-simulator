@@ -71,7 +71,8 @@ def build_parser() -> argparse.ArgumentParser:
     gui.add_argument("input", type=Path, nargs="?", help="image, folder of images, or video")
     gui.add_argument("--fps", type=float)
     gui.add_argument("--allow-stretch", action="store_true")
-    gui.add_argument("--no-detector", action="store_true", help="do not load YOLO (cached/edited boxes only)")
+    gui.add_argument("--no-detector", action="store_true", help="do not load the detector (cached/edited boxes only)")
+    gui.add_argument("--model", default=DEFAULT_MODEL)
     return p
 
 
@@ -203,7 +204,8 @@ def cmd_gui(args) -> int:
         from .gui.app import run_gui
     except ImportError as e:
         raise FloodSimError("GUI dependencies missing: pip install -e .[gui]") from e
-    return run_gui(args.input, fps=args.fps, allow_stretch=args.allow_stretch, no_detector=args.no_detector)
+    return run_gui(args.input, fps=args.fps, allow_stretch=args.allow_stretch, no_detector=args.no_detector,
+                   model=args.model)
 
 
 COMMANDS = {"run": cmd_run, "detect": cmd_detect, "compare": cmd_compare, "export": cmd_export, "gui": cmd_gui}
