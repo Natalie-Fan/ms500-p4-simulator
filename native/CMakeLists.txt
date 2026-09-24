@@ -32,6 +32,7 @@ target_link_options(flood_core PRIVATE -static-libgcc)
 
 enable_testing()
 
-add_executable(test_shim tests/test_shim.c)
+add_executable(test_shim tests/test_shim.c tests/synth.c)
+target_include_directories(test_shim PRIVATE tests)
 target_link_libraries(test_shim PRIVATE flood_objs)
 add_test(NAME shim COMMAND test_shim)

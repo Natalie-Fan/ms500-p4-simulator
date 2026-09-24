@@ -171,3 +171,199 @@ void sim_rgb_to_gray(const uint8_t *rgb, int32_t width, int32_t height, uint8_t 
                                 >> SIM_GRAY_SHIFT);
     }
 }
+
+/* --------------------------------------------------------------- reference */
+
+static flood_gray_t full_frame(const uint8_t *gray)
+{
+    flood_gray_t f = { gray, SIM_FRAME_W, SIM_FRAME_H, SIM_FRAME_W };
+    return f;
+}
+
+void *sim_ref_new(void)      { return calloc(1, sizeof(flood_reference_t)); }
+void  sim_ref_free(void *ref) { free(ref); }
+
+int32_t sim_ref_build(void *ref, const uint8_t *gray)
+{
+    if (!ref || !gray) return 0;
+    const flood_gray_t dry = full_frame(gray);
+    return flood_reference_init((flood_reference_t *)ref, &dry) ? 1 : 0;
+}
+
+int32_t sim_ref_ready(const void *ref)
+{
+    return (ref && ((const flood_reference_t *)ref)->ready) ? 1 : 0;
+}
+
+float sim_correlation_at(const void *ref, const uint8_t *gray, int32_t dx, int32_t dy)
+{
+    const flood_gray_t f = full_frame(gray);
+    return flood_curb_correlation_at((const flood_reference_t *)ref, &f, dx, dy);
+}
+
+/* ------------------------------------------------------------------- boxes */
+
+static flood_box_t to_flood_box(const sim_box_t *b)
+{
+    flood_box_t f;
+    f.x0 = b->x0; f.y0 = b->y0; f.x1 = b->x1; f.y1 = b->y1;
+    f.confidence = b->confidence;
+    f.cls = (flood_class_t)b->cls;
+    return f;
+}
+
+static int32_t clamp_box_count(int32_t n)
+{
+    return n < 0 ? 0 : (n > SIM_MAX_BOXES ? SIM_MAX_BOXES : n);
+}
+
+void sim_box_from_accelerator(float x0, float y0, float x1, float y1, float confidence,
+                              int32_t cls, int32_t input_w, int32_t input_h, sim_box_t *out)
+{
+    const flood_box_t b = flood_box_from_accelerator(x0, y0, x1, y1, confidence,
+                                                     (flood_class_t)cls, input_w, input_h);
+    out->x0 = b.x0; out->y0 = b.y0; out->x1 = b.x1; out->y1 = b.y1;
+    out->confidence = b.confidence;
+    out->cls = (int32_t)b.cls;
+}
+
+/* Dense scoring: the two firmware stages on one frame, no capture state. */
+int32_t sim_score(const void *ref, const uint8_t *gray, const sim_box_t *boxes,
+                  int32_t n_boxes, sim_score_t *out)
+{
+    if (!out) return 0;
+    memset(out, 0, sizeof(*out));
+    if (!sim_ref_ready(ref) || !gray) return 0;
+
+    flood_box_t fb[SIM_MAX_BOXES];
+    const int32_t n = boxes ? clamp_box_count(n_boxes) : 0;
+    for (int32_t i = 0; i < n; ++i) fb[i] = to_flood_box(&boxes[i]);
+    const flood_veto_t v = flood_veto_check(fb, n);
+
+    const flood_gray_t f = full_frame(gray);
+    const flood_curb_state_t cs = flood_curbcheck((const flood_reference_t *)ref, &f, true);
+
+    out->veto_usable      = v.usable ? 1 : 0;
+    out->veto_coverage    = v.coverage;
+    out->veto_worst_class = (int32_t)v.worst_class;
+    out->curb_correlation = cs.correlation;
+    out->submerged        = cs.submerged ? 1 : 0;
+    out->severity         = (int32_t)cs.severity;
+    out->shift_dx         = cs.shift_dx;
+    out->shift_dy         = cs.shift_dy;
+    return 1;
+}
+
+/* ------------------------------------------------------------- device loop */
+
+typedef struct {
+    flood_capture_t capture;
+    uint8_t        *gray;
+    sim_box_t       boxes[SIM_MAX_BOXES];
+    int32_t         n_boxes;
+    int32_t         attempt;
+    int32_t         last_frame_idx;
+    flood_veto_t    last_veto;
+    sim_provider_fn provider;
+    void           *user;
+} sim_device_t;
+
+void *sim_device_new(void)
+{
+    sim_device_t *d = calloc(1, sizeof(*d));
+    if (!d) return NULL;
+    d->gray = malloc((size_t)SIM_FRAME_W * SIM_FRAME_H);
+    if (!d->gray) { free(d); return NULL; }
+    flood_capture_init(&d->capture);
+    return d;
+}
+
+void sim_device_free(void *dev)
+{
+    sim_device_t *d = dev;
+    if (!d) return;
+    free(d->gray);
+    free(d);
+}
+
+void sim_device_reset(void *dev)
+{
+    sim_device_t *d = dev;
+    if (d) flood_capture_init(&d->capture);
+}
+
+/* flood_grab_fn: attempt N of flood_capture_sample() asks the provider for
+ * attempt N's frame (0 = sample time, 1 = retry). */
+static bool device_grab(flood_gray_t *out, void *user)
+{
+    sim_device_t *d = user;
+    const int32_t attempt = d->attempt++;
+    int32_t frame_idx = -1;
+    d->n_boxes = 0;
+    if (!d->provider(attempt, d->gray, d->boxes, &d->n_boxes, &frame_idx, d->user)) return false;
+    d->n_boxes = clamp_box_count(d->n_boxes);
+    d->last_frame_idx = frame_idx;
+    *out = full_frame(d->gray);
+    return true;
+}
+
+/* flood_detect_fn: returns the boxes the provider delivered with the frame,
+ * and records the veto for reporting (flood_capture_sample() computes the
+ * same veto itself and does not expose it). */
+static int device_detect(const flood_gray_t *frame, flood_box_t *boxes, int max_boxes, void *user)
+{
+    (void)frame;
+    sim_device_t *d = user;
+    const int n = d->n_boxes < max_boxes ? d->n_boxes : max_boxes;
+    for (int i = 0; i < n; ++i) boxes[i] = to_flood_box(&d->boxes[i]);
+    d->last_veto = flood_veto_check(boxes, n);
+    return n;
+}
+
+void sim_device_sample(void *dev, const void *ref, sim_provider_fn provider, void *user,
+                       sim_result_t *out)
+{
+    sim_device_t *d = dev;
+    memset(out, 0, sizeof(*out));
+    out->frame_idx = -1;
+    if (!d || !provider) {
+        out->outcome = SIM_OUT_SKIPPED_NO_REF;
+        return;
+    }
+    /* flood_task.c:271 -- an unready reference is never sampled: the firmware
+     * would otherwise read correlation 0 as a flood on every sample. */
+    if (!sim_ref_ready(ref)) {
+        out->outcome = SIM_OUT_SKIPPED_NO_REF;
+        out->since_image = d->capture.since_image;
+        return;
+    }
+
+    d->attempt = 0;
+    d->last_frame_idx = -1;
+    d->last_veto.usable = true;
+    d->last_veto.coverage = 0.0f;
+    d->last_veto.worst_class = FLOOD_CLASS_OTHER;
+    d->provider = provider;
+    d->user = user;
+
+    const flood_reference_t *r = ref;
+    const flood_decision_t dec = flood_capture_sample(&d->capture, r, device_grab, device_detect, d);
+
+    out->outcome          = (int32_t)dec.outcome;
+    out->frames_taken     = dec.frames_taken;
+    out->has_reading      = dec.has_reading ? 1 : 0;
+    out->curb_correlation = dec.curb_correlation;
+    out->severity         = (int32_t)dec.severity;
+    out->veto_usable      = d->last_veto.usable ? 1 : 0;
+    out->veto_coverage    = d->last_veto.coverage;
+    out->veto_worst_class = (int32_t)d->last_veto.worst_class;
+    out->since_image      = d->capture.since_image;
+    out->frame_idx        = d->last_frame_idx;
+    if (dec.has_reading) {
+        /* A reading always comes from the last grab, still in d->gray. The
+         * decision does not carry the registration shift, so recompute it
+         * with the same firmware function flood_curbcheck() used. */
+        const flood_gray_t f = full_frame(d->gray);
+        flood_estimate_shift(r, &f, &out->shift_dx, &out->shift_dy);
+    }
+}
