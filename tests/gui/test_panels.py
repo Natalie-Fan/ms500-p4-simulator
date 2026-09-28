@@ -6,7 +6,8 @@ from floodsim.results import ScoreResult
 ROW = {"sample": 3, "t_sec": 60.0, "frame_idx": 2, "outcome": "upload", "frames_taken": 1,
        "has_reading": True, "curb_correlation": 0.21, "severity": "severe", "shift_dx": -3,
        "shift_dy": 1, "veto_usable": True, "veto_coverage": 0.04, "veto_worst_class": "car",
-       "since_image": 0, "label": None}
+       "since_image": 0, "gallery_slot": 1, "gallery_source": "auto", "admitted": False,
+       "notice": False, "gallery_count": 2, "label": None}
 
 
 def test_verdict_device_row(qtbot):
@@ -18,12 +19,17 @@ def test_verdict_device_row(qtbot):
     assert p.veto_label.text() == "usable, coverage 4% (car)"
     assert p.shift_label.text() == "dx -3  dy +1"
     assert p.source_label.text() == "device sample #3 at 60.00 s"
+    assert p.matched_label.text() == "slot 1 (auto)"
+    p.show_device(dict(ROW, gallery_slot=0, gallery_source="manual", admitted=True, notice=True), 0.45)
+    assert p.matched_label.text().startswith("slot 0 (manual); learned a new reference (2 now)")
+    assert "add a baseline for this lighting" in p.matched_label.text()
 
 
 def test_verdict_score_and_no_reading(qtbot):
     p = VerdictPanel()
     qtbot.addWidget(p)
-    p.show_score(ScoreResult(False, 1.0, "car", 1.0, False, "none", 0, 0), "DRY", 0.45)
+    p.show_score(ScoreResult(False, 1.0, "car", 1.0, False, "none", 0, 0, 0), "DRY", 0.45)
+    assert p.matched_label.text() == "slot 0"
     assert p.outcome_label.text() == "VETOED" and p.label_label.text() == "DRY"
     p.show_score(None, None, 0.45)
     assert p.outcome_label.text() == "no score" and p.corr_label.text() == "–"

@@ -13,7 +13,8 @@ from .errors import FloodSimError
 from .labels import format_score
 
 _FLOAT6 = {"curb_correlation", "veto_coverage"}
-_CATEGORICAL = ("frame_idx", "outcome", "severity", "submerged", "veto_usable")
+_CATEGORICAL = ("frame_idx", "outcome", "severity", "submerged", "veto_usable",
+                "gallery_slot", "admitted", "notice")
 
 
 def format_value(key: str, v) -> str:
@@ -103,6 +104,10 @@ def summarize(rows: list[dict], mode: str, decode_failures: int, score: dict | N
         counts = Counter(r["outcome"] for r in rows)
         for name in ("upload", "clear", "blocked", "heartbeat", "skipped_no_ref"):
             lines.append(f"{name}: {counts.get(name, 0)}")
+        lines.append(f"references learned: {sum(r['admitted'] for r in rows)}")
+        lines.append(f"no-confident-match notices: {sum(r['notice'] for r in rows)}")
+        if rows:
+            lines.append(f"gallery size at end: {rows[-1]['gallery_count']}")
     else:
         lines.append(f"submerged: {sum(r['submerged'] for r in rows)}")
         lines.append(f"vetoed (obstructed): {sum(not r['veto_usable'] for r in rows)}")

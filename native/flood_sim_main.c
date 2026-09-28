@@ -12,15 +12,20 @@
 #include <io.h>
 #endif
 
+#define MAX_REFERENCES 8   /* FLOOD_GALLERY_MAX_SLOTS */
+
 typedef struct {
-    const char *reference, *frames, *boxes, *geometry, *mode;
+    const char *references[MAX_REFERENCES];   /* each a manual gallery slot */
+    int n_references;
+    const char *frames, *boxes, *geometry, *mode;
     double period, retry_gap, fps;
     int every;
 } options_t;
 
 static void usage(void)
 {
-    fputs("usage: flood_sim --reference dry.pgm --frames <dir|list> [--boxes boxes.csv]\n"
+    fputs("usage: flood_sim --reference dry.pgm [--reference dusk.pgm ...] --frames <dir|list>\n"
+          "                 [--boxes boxes.csv]\n"
           "                 [--geometry geo.json] [--mode device|dense] [--period 60]\n"
           "                 [--retry-gap 1] [--every 1] [--fps 1]\n", stderr);
 }
@@ -37,7 +42,13 @@ static int parse_args(int argc, char **argv, options_t *o)
         const char *a = argv[i];
         const char *v = i + 1 < argc ? argv[i + 1] : NULL;
         if (!v) { fprintf(stderr, "missing value for %s\n", a); return 0; }
-        if (!strcmp(a, "--reference")) o->reference = v;
+        if (!strcmp(a, "--reference")) {
+            if (o->n_references == MAX_REFERENCES) {
+                fprintf(stderr, "at most %d --reference images\n", MAX_REFERENCES);
+                return 0;
+            }
+            o->references[o->n_references++] = v;
+        }
         else if (!strcmp(a, "--frames")) o->frames = v;
         else if (!strcmp(a, "--boxes")) o->boxes = v;
         else if (!strcmp(a, "--geometry")) o->geometry = v;
@@ -48,7 +59,7 @@ static int parse_args(int argc, char **argv, options_t *o)
         else if (!strcmp(a, "--fps")) o->fps = atof(v);
         else { fprintf(stderr, "unknown option %s\n", a); return 0; }
     }
-    if (!o->reference || !o->frames) { fputs("--reference and --frames are required\n", stderr); return 0; }
+    if (!o->n_references || !o->frames) { fputs("--reference and --frames are required\n", stderr); return 0; }
     if (strcmp(o->mode, "device") != 0 && strcmp(o->mode, "dense") != 0) {
         fputs("--mode must be device or dense\n", stderr);
         return 0;
@@ -62,26 +73,36 @@ static int parse_args(int argc, char **argv, options_t *o)
 
 static const char *json_bool(int32_t v) { return v ? "true" : "false"; }
 
+/* flood_ref_source_t: 0 = MANUAL, 1 = AUTO; -1 = no slot matched. */
+static const char *source_name(int32_t source)
+{
+    return source == 0 ? "manual" : source == 1 ? "auto" : "none";
+}
+
 static void print_device(int sample, double t, const sim_result_t *r)
 {
     printf("{\"mode\":\"device\",\"sample\":%d,\"t_sec\":%.3f,\"frame_idx\":%d,\"outcome\":\"%s\","
            "\"frames_taken\":%d,\"has_reading\":%s,\"curb_correlation\":%.6f,\"severity\":\"%s\","
            "\"shift_dx\":%d,\"shift_dy\":%d,\"veto_usable\":%s,\"veto_coverage\":%.6f,"
-           "\"veto_worst_class\":\"%s\",\"since_image\":%d}\n",
+           "\"veto_worst_class\":\"%s\",\"since_image\":%d,\"gallery_slot\":%d,"
+           "\"gallery_source\":\"%s\",\"admitted\":%s,\"notice\":%s,\"gallery_count\":%d}\n",
            sample, t, r->frame_idx, sim_outcome_name(r->outcome), r->frames_taken,
            json_bool(r->has_reading), r->curb_correlation, sim_severity_name(r->severity),
            r->shift_dx, r->shift_dy, json_bool(r->veto_usable), r->veto_coverage,
-           sim_class_name(r->veto_worst_class), r->since_image);
+           sim_class_name(r->veto_worst_class), r->since_image, r->gallery_slot,
+           source_name(r->gallery_source), json_bool(r->admitted), json_bool(r->notice),
+           r->gallery_count);
 }
 
 static void print_dense(int32_t frame_idx, double t, const sim_score_t *s)
 {
     printf("{\"mode\":\"dense\",\"frame_idx\":%d,\"t_sec\":%.3f,\"veto_usable\":%s,"
            "\"veto_coverage\":%.6f,\"veto_worst_class\":\"%s\",\"curb_correlation\":%.6f,"
-           "\"submerged\":%s,\"severity\":\"%s\",\"shift_dx\":%d,\"shift_dy\":%d}\n",
+           "\"submerged\":%s,\"severity\":\"%s\",\"shift_dx\":%d,\"shift_dy\":%d,"
+           "\"gallery_slot\":%d}\n",
            frame_idx, t, json_bool(s->veto_usable), s->veto_coverage,
            sim_class_name(s->veto_worst_class), s->curb_correlation, json_bool(s->submerged),
-           sim_severity_name(s->severity), s->shift_dx, s->shift_dy);
+           sim_severity_name(s->severity), s->shift_dx, s->shift_dy, s->gallery_slot);
 }
 
 typedef struct {
@@ -134,10 +155,13 @@ int main(int argc, char **argv)
     }
 
     uint8_t *gray = malloc((size_t)SIM_FRAME_W * SIM_FRAME_H);
-    void *ref = sim_ref_new();
-    if (!gray || !ref) return fail("out of memory");
-    if (!sim_read_pgm(o.reference, gray, err, sizeof err)) return fail(err);
-    if (!sim_ref_build(ref, gray)) return fail("geometry leaves no usable sampling window");
+    void *gallery = sim_gallery_new();
+    if (!gray || !gallery) return fail("out of memory");
+    for (int i = 0; i < o.n_references; ++i) {
+        if (!sim_read_pgm(o.references[i], gray, err, sizeof err)) return fail(err);
+        if (sim_gallery_add_manual(gallery, gray) != 1)
+            return fail("geometry leaves no usable sampling window");
+    }
 
     sim_frame_t *frames = NULL;
     const int n = sim_list_frames(o.frames, o.fps, &frames, err, sizeof err);
@@ -161,7 +185,7 @@ int main(int argc, char **argv)
             ctx.times[0] = t;
             ctx.times[1] = t + o.retry_gap;
             sim_result_t r;
-            sim_device_sample(dev, ref, provide_frame, &ctx, &r);
+            sim_device_sample(dev, gallery, provide_frame, &ctx, &r);
             print_device(k, t, &r);
         }
         sim_device_free(dev);
@@ -174,14 +198,14 @@ int main(int argc, char **argv)
             }
             const int nfb = sim_boxes_for(boxes, n_boxes, frames[i].frame_idx, fb, SIM_MAX_BOXES);
             sim_score_t s;
-            sim_score(ref, gray, fb, nfb, &s);
+            sim_score(gallery, gray, fb, nfb, &s);
             print_dense(frames[i].frame_idx, frames[i].t_sec, &s);
         }
     }
 
     free(boxes);
     free(frames);
-    sim_ref_free(ref);
+    sim_gallery_free(gallery);
     free(gray);
     return 0;
 }

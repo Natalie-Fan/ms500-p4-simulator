@@ -6,7 +6,7 @@ import threading
 from pathlib import Path
 
 from PySide6.QtCore import QRectF, Qt, QTimer
-from PySide6.QtGui import QAction, QKeySequence
+from PySide6.QtGui import QAction, QActionGroup, QKeySequence
 from PySide6.QtWidgets import (QDialog, QDialogButtonBox, QDoubleSpinBox, QFileDialog, QFormLayout,
                                QInputDialog, QLabel, QMainWindow, QMessageBox, QProgressBar,
                                QPushButton, QSpinBox, QSplitter, QToolButton, QVBoxLayout, QWidget)
@@ -35,6 +35,8 @@ class RunDialog(QDialog):
         self.period.setDecimals(3)
         self.period.setSuffix(" s")
         self.period.setValue(defaults.period)
+        self.period.setToolTip(f"Firmware samples every {defaults.period:g} s. Shorten it to get more "
+                               "samples, and so more reference learning, out of a short clip.")
         self.retry = QDoubleSpinBox()
         self.retry.setRange(0.0, 3600.0)
         self.retry.setDecimals(3)
@@ -73,6 +75,7 @@ class MainWindow(QMainWindow):
         self._want: int | None = None
         self._loading = False
         self._diff = False
+        self._show_ref: int | None = None     # manual reference shown instead of the frame
         self._last_frame = None
         self._frame_failing = False
         self._overlay: dict | None = None
@@ -139,9 +142,10 @@ class MainWindow(QMainWindow):
         m.addSeparator()
         self._action(m, "Quit", self.close, QKeySequence.Quit)
         m = bar.addMenu("&Reference")
-        self._action(m, "Set from current frame", self._set_reference)
-        self._action(m, "Load image…", self._load_reference_image)
-        self._action(m, "Rebuild under current geometry", self._rebuild_reference)
+        self._action(m, "Add current frame", self._set_reference)
+        self._action(m, "Add image…", self._load_reference_image)
+        self._action(m, "Rebuild under current geometry (drops learned)", self._rebuild_reference)
+        self._action(m, "Clear all references", self._clear_references)
         m = bar.addMenu("&Geometry")
         self._action(m, "Load…", self._load_geometry)
         self._action(m, "Save…", self._save_geometry)
@@ -161,6 +165,9 @@ class MainWindow(QMainWindow):
                          checkable=True, checked=getattr(defaults, name))
         m.addSeparator()
         self._action(m, "Difference from reference", self._toggle_diff, checkable=True)
+        self.show_ref_menu = m.addMenu("Show reference")
+        self._show_ref_group = QActionGroup(self)
+        self._fill_show_ref_menu(())
 
     def _build_status(self, build_info: dict) -> None:
         bar = self.statusBar()
@@ -189,9 +196,9 @@ class MainWindow(QMainWindow):
         self.frame_view.geometryEdited.connect(self._on_geometry_edited)
         self.frame_view.boxDrawn.connect(self._on_box_drawn)
         self.frame_view.boxDeleteRequested.connect(self._on_box_delete)
-        self.timeline.seekFrame.connect(self.show_frame)
+        self.timeline.seekFrame.connect(self._navigate)
         self.timeline.playToggled.connect(self._set_playing)
-        self.samples.frameRequested.connect(self.show_frame)
+        self.samples.frameRequested.connect(self._navigate)
 
     def _show_error(self, message: str) -> None:
         self.last_error = message
@@ -252,9 +259,17 @@ class MainWindow(QMainWindow):
         self.setWindowTitle(f"floodsim: {info['name']}")
         self.statusBar().showMessage(f"{info['n_frames']} frame(s)", 5000)
         self._refresh_reference()
-        self.show_frame(0)
+        self._navigate(0)
 
     # -------------------------------------------------------------- frames
+    def _navigate(self, idx: int) -> None:
+        """A frame the user asked for: leave the reference view so the view doesn't look stuck."""
+        if self._show_ref is not None:
+            self._show_ref = None
+            self._show_ref_group.actions()[0].setChecked(True)
+            self.statusBar().clearMessage()
+        self.show_frame(idx)
+
     def show_frame(self, idx: int) -> None:
         if self._n == 0:
             return
@@ -267,9 +282,28 @@ class MainWindow(QMainWindow):
             return
         idx, self._want = self._want, None
         self._loading = True
+        if self._show_ref is not None:
+            ref = self._show_ref
+            self.worker.submit(lambda: self.session.reference_view(ref), self._on_reference_view,
+                               self._on_reference_view_error)
+            return
         diff = self._diff
         self.worker.submit(lambda: self.session.frame(idx, diff=diff), self._on_frame,
                            lambda message: self._on_frame_error(idx, message))
+
+    def _on_reference_view(self, rgb) -> None:
+        self._loading = False
+        self.frame_view.set_image(rgb)
+        self.frame_view.set_boxes([])
+        self.frame_view.set_shift(None)
+        name = self._show_ref_group.checkedAction().text()
+        self.statusBar().showMessage(f"Showing reference {name} (View ▸ Show reference ▸ Off to return)")
+        self._load_next()
+
+    def _on_reference_view_error(self, message: str) -> None:
+        self._loading = False
+        self._set_show_ref(None)
+        self._show_error(message)
 
     def _on_frame(self, fd) -> None:
         self._loading = False
@@ -329,6 +363,30 @@ class MainWindow(QMainWindow):
     def _on_ref_status(self, status) -> None:
         self.verdict.show_reference(status)
         self.tools.set_actions_enabled(self._n > 0, status.ready)
+        self._fill_show_ref_menu(status.manual_names)
+
+    def _fill_show_ref_menu(self, names) -> None:
+        """Off plus one entry per manual reference; drops back to the frame if the shown one is gone."""
+        shown = self._show_ref if self._show_ref is not None and self._show_ref < len(names) else None
+        self.show_ref_menu.clear()
+        for action in self._show_ref_group.actions():
+            self._show_ref_group.removeAction(action)
+        for i, text in [(None, "Off"), *((i, f"{i + 1}: {n}") for i, n in enumerate(names))]:
+            action = QAction(text, self, checkable=True)
+            action.setChecked(i == shown)
+            action.triggered.connect(lambda _=False, i=i: self._set_show_ref(i))
+            self._show_ref_group.addAction(action)
+            self.show_ref_menu.addAction(action)
+        self.show_ref_menu.setEnabled(bool(names))
+        if shown != self._show_ref:
+            self._set_show_ref(None)
+
+    def _set_show_ref(self, index: int | None) -> None:
+        self._show_ref = index
+        self._show_ref_group.actions()[0 if index is None else index + 1].setChecked(True)
+        if index is None:
+            self.statusBar().clearMessage()
+        self.show_frame(self._current)
 
     def _after_reference(self, status) -> None:
         self._on_ref_status(status)
@@ -347,6 +405,9 @@ class MainWindow(QMainWindow):
 
     def _rebuild_reference(self) -> None:
         self.worker.submit(self.session.rebuild_reference, self._after_reference)
+
+    def _clear_references(self) -> None:
+        self.worker.submit(self.session.clear_references, self._after_reference)
 
     # ------------------------------------------------------------ geometry
     def _apply_geometry(self, g: Geometry) -> None:
@@ -429,6 +490,9 @@ class MainWindow(QMainWindow):
         self.verdict.show_state(row["since_image"], self._overlay["heartbeat_every"] if self._overlay else None)
         self.samples.add_row(row, "device")
         self._update_plot()
+        if row["admitted"]:     # the gallery grew: show it, and rescore frames against it
+            self._refresh_reference()
+            self._invalidate_scores()
 
     def _score(self) -> None:
         if self._n == 0:
@@ -440,7 +504,11 @@ class MainWindow(QMainWindow):
 
     def _reset_state(self) -> None:
         every = self._overlay["heartbeat_every"] if self._overlay else None
-        self.worker.submit(self.session.reset_device, lambda _: self.verdict.show_state(0, every))
+        def done(status) -> None:
+            self.verdict.show_state(0, every)
+            self._after_reference(status)
+
+        self.worker.submit(self.session.reset_device, done)
 
     # ---------------------------------------------------------- batch runs
     def _start_run(self, mode: str) -> None:
@@ -548,13 +616,13 @@ class MainWindow(QMainWindow):
         if self._current >= self._n - 1:
             self.timeline.set_playing(False)
             return
-        self.show_frame(self._current + 1)
+        self._navigate(self._current + 1)
 
     def keyPressEvent(self, event) -> None:
         if event.key() == Qt.Key_Left:
-            self.show_frame(self._current - 1)
+            self._navigate(self._current - 1)
         elif event.key() == Qt.Key_Right:
-            self.show_frame(self._current + 1)
+            self._navigate(self._current + 1)
         elif event.key() == Qt.Key_Space:
             self.timeline.set_playing(not self.timeline.play_btn.isChecked())
         else:

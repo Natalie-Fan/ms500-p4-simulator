@@ -16,4 +16,9 @@
 void synth_dry(uint8_t *gray);
 void synth_flooded(uint8_t *gray);
 
+/* Dry, but the kerb rows blended with an unrelated texture (a stand-in for a
+ * lighting change): correlation against synth_dry is about
+ * dry_weight / sqrt(dry_weight^2 + other_weight^2). */
+void synth_relit(uint8_t *gray, int dry_weight, int other_weight, int seed);
+
 #endif

@@ -12,7 +12,7 @@
 #define SIM_API
 #endif
 
-#define SIM_ABI_VERSION        2
+#define SIM_ABI_VERSION        3
 #define SIM_FRAME_W            1920
 #define SIM_FRAME_H            1080
 #define SIM_MAX_BOXES          32     /* FLOOD_VETO_MAX_BOXES */
@@ -34,6 +34,7 @@ typedef struct {
     int32_t severity;
     int32_t shift_dx;
     int32_t shift_dy;
+    int32_t gallery_slot;             /* slot that scored best, -1 if none */
 } sim_score_t;
 
 typedef struct {
@@ -49,6 +50,11 @@ typedef struct {
     int32_t veto_worst_class;
     int32_t since_image;              /* capture state after this sample */
     int32_t frame_idx;                /* last frame grabbed successfully, -1 if none */
+    int32_t gallery_slot;             /* slot that matched, -1 unless has_reading */
+    int32_t gallery_source;           /* flood_ref_source_t of that slot, -1 if none */
+    int32_t admitted;                 /* this sample auto-admitted a new reference */
+    int32_t notice;                   /* this sample raised the "no confident match" notice */
+    int32_t gallery_count;            /* in-use slots after this sample */
 } sim_result_t;
 
 /* Fills the frame for `attempt` (0 = sample time, 1 = retry). gray_out holds
@@ -83,16 +89,29 @@ SIM_API int32_t sim_strip_outline(float *xs, float *y_lo, float *y_hi, int32_t m
 /* ---- frames ---- */
 SIM_API void sim_rgb_to_gray(const uint8_t *rgb, int32_t width, int32_t height, uint8_t *gray_out);
 
-/* ---- reference and scoring (Task 2) ---- */
-SIM_API void   *sim_ref_new(void);
-SIM_API void    sim_ref_free(void *ref);
-SIM_API int32_t sim_ref_build(void *ref, const uint8_t *gray);
-SIM_API int32_t sim_ref_ready(const void *ref);
-SIM_API float   sim_correlation_at(const void *ref, const uint8_t *gray, int32_t dx, int32_t dy);
+/* ---- reference gallery and scoring ----
+ * A gallery wraps the firmware flood_gallery_t. Manual references are built
+ * from a dry frame; AUTO references are only ever admitted by
+ * sim_device_sample(), as flood_task.c does once per sampling cycle. */
+SIM_API void   *sim_gallery_new(void);
+SIM_API void    sim_gallery_free(void *gallery);
+SIM_API void    sim_gallery_clear(void *gallery);
+SIM_API int32_t sim_gallery_max_slots(void);
+SIM_API int32_t sim_gallery_count(const void *gallery);
+/* 1 = added; 0 = geometry leaves no usable sampling window; -1 = gallery full
+ * of manual references (flood_task.c's flood_do_calibration() failure). */
+SIM_API int32_t sim_gallery_add_manual(void *gallery, const uint8_t *gray);
+/* Slot `index`: returns 1 if in use, filling source (flood_ref_source_t) and
+ * the cycle it last matched; 0 if unused or out of range. */
+SIM_API int32_t sim_gallery_slot(const void *gallery, int32_t index, int32_t *source,
+                                 uint32_t *last_matched_cycle);
+SIM_API float   sim_correlation_at(const void *gallery, int32_t slot, const uint8_t *gray,
+                                   int32_t dx, int32_t dy);
 SIM_API void    sim_box_from_accelerator(float x0, float y0, float x1, float y1, float confidence,
                                          int32_t cls, int32_t input_w, int32_t input_h,
                                          sim_box_t *out);
-SIM_API int32_t sim_score(const void *ref, const uint8_t *gray, const sim_box_t *boxes,
+/* Read-only: scores against every slot, keeps the best; never admits. */
+SIM_API int32_t sim_score(const void *gallery, const uint8_t *gray, const sim_box_t *boxes,
                           int32_t n_boxes, sim_score_t *out);
 SIM_API float   sim_band_coverage(const sim_box_t *box);
 SIM_API int32_t sim_heartbeat_every(void);
@@ -101,7 +120,8 @@ SIM_API int32_t sim_heartbeat_every(void);
 SIM_API void *sim_device_new(void);
 SIM_API void  sim_device_free(void *dev);
 SIM_API void  sim_device_reset(void *dev);
-SIM_API void  sim_device_sample(void *dev, const void *ref, sim_provider_fn provider,
+/* One firmware sampling cycle; may admit an AUTO reference into `gallery`. */
+SIM_API void  sim_device_sample(void *dev, void *gallery, sim_provider_fn provider,
                                 void *user, sim_result_t *out);
 
 #endif /* SIM_SHIM_H */

@@ -10,11 +10,11 @@ from floodsim.core import build_error_message, firmware_dir, needs_rebuild
 from floodsim.errors import FloodSimError
 from floodsim.geometry import Geometry
 from floodsim.results import Box
-from tests.synth import CAR, dry_gray, flooded_gray
+from tests.synth import CAR, dry_gray, dusk_gray, flooded_gray, night_gray
 
 
 def test_build_info_records_dll_and_firmware(build_info):
-    assert build_info["dll"]["abi"] == core_mod.ABI_VERSION == 2
+    assert build_info["dll"]["abi"] == core_mod.ABI_VERSION == 3
     assert build_info["dll"]["stale"] is False
     assert Path(build_info["firmware"]["dir"]).name == "NETWORK_P4_FLOOD_DETECTION"
     assert "commit" in build_info["firmware"] and "dirty" in build_info["firmware"]
@@ -47,8 +47,8 @@ def test_validate_geometry_uses_firmware_messages(core):
 
 
 def test_identical_frame_scores_one(core):
-    ref = core.new_reference()
-    assert ref.build(dry_gray())
+    ref = core.new_gallery()
+    ref.add_manual(dry_gray())
     s = core.score(ref, dry_gray(), [])
     assert s.curb_correlation == pytest.approx(1.0, abs=1e-6)
     assert s.submerged is False and s.severity == "none"
@@ -57,16 +57,16 @@ def test_identical_frame_scores_one(core):
 
 
 def test_flooded_frame_is_submerged(core):
-    ref = core.new_reference()
-    ref.build(dry_gray())
+    ref = core.new_gallery()
+    ref.add_manual(dry_gray())
     s = core.score(ref, flooded_gray(), [])
     assert s.curb_correlation == 0.0
     assert s.submerged is True and s.severity == "moderate"
 
 
 def test_box_across_kerb_vetoes(core):
-    ref = core.new_reference()
-    ref.build(dry_gray())
+    ref = core.new_gallery()
+    ref.add_manual(dry_gray())
     s = core.score(ref, dry_gray(), [CAR])
     assert s.veto_usable is False
     assert s.veto_coverage == 1.0
@@ -75,12 +75,12 @@ def test_box_across_kerb_vetoes(core):
 
 def test_score_without_reference_raises(core):
     with pytest.raises(FloodSimError, match="reference"):
-        core.score(core.new_reference(), dry_gray(), [])
+        core.score(core.new_gallery(), dry_gray(), [])
 
 
 def test_reference_goes_stale_when_geometry_changes(core):
-    ref = core.new_reference()
-    ref.build(dry_gray())
+    ref = core.new_gallery()
+    ref.add_manual(dry_gray())
     assert ref.is_stale() is False
     g = core.default_geometry()
     g[1] = 240.0
@@ -110,8 +110,8 @@ def _provider(frames):
 
 
 def test_device_clear_upload_retry(core):
-    ref = core.new_reference()
-    ref.build(dry_gray())
+    ref = core.new_gallery()
+    ref.add_manual(dry_gray())
     dev = core.new_device()
     r = dev.sample(ref, _provider([(dry_gray(), [], 0), (dry_gray(), [], 1)]))
     assert (r.outcome, r.frames_taken, r.since_image, r.frame_idx) == ("clear", 1, 1, 0)
@@ -122,8 +122,8 @@ def test_device_clear_upload_retry(core):
 
 
 def test_device_heartbeat_on_60th_reading(core):
-    ref = core.new_reference()
-    ref.build(dry_gray())
+    ref = core.new_gallery()
+    ref.add_manual(dry_gray())
     dev = core.new_device()
     outcomes = [dev.sample(ref, _provider([(dry_gray(), [], 0)] * 2)).outcome for _ in range(60)]
     assert outcomes[:59] == ["clear"] * 59
@@ -134,13 +134,53 @@ def test_device_skips_without_reference(core):
     dev = core.new_device()
     r = dev.sample(None, _provider([(dry_gray(), [], 0)] * 2))
     assert r.outcome == "skipped_no_ref" and r.frame_idx == -1
-    r = dev.sample(core.new_reference(), _provider([(dry_gray(), [], 0)] * 2))
+    r = dev.sample(core.new_gallery(), _provider([(dry_gray(), [], 0)] * 2))
     assert r.outcome == "skipped_no_ref"
 
 
+def test_gallery_slots_and_full_of_manual(core):
+    g = core.new_gallery()
+    assert g.count == 0 and not g.ready and g.slots() == []
+    for _ in range(8):
+        g.add_manual(dry_gray())
+    assert g.count == 8 and all(src == "manual" for _, src, _ in g.slots())
+    with pytest.raises(FloodSimError, match="full of manual"):
+        g.add_manual(dry_gray())
+    g.clear()
+    assert g.count == 0
+
+
+def test_score_picks_best_slot_and_never_learns(core):
+    g = core.new_gallery()
+    g.add_manual(dry_gray())
+    s = core.score(g, dusk_gray(), [])
+    assert 0.65 <= s.curb_correlation < 0.95 and s.gallery_slot == 0
+    assert g.count == 1          # dense scoring is read-only
+    g.add_manual(dusk_gray())
+    s = core.score(g, dusk_gray(), [])
+    assert s.gallery_slot == 1 and s.curb_correlation == pytest.approx(1.0, abs=1e-6)
+
+
+def test_device_learns_new_lighting_and_notices_unmatched(core):
+    g = core.new_gallery()
+    g.add_manual(dry_gray())
+    dev = core.new_device()
+    dusk = _provider([(dusk_gray(), [], 7)] * 2)
+    r = dev.sample(g, dusk)
+    assert (r.gallery_slot, r.gallery_source, r.admitted, r.gallery_count) == (0, "manual", True, 2)
+    assert [src for _, src, _ in g.slots()] == ["manual", "auto"]
+    r = dev.sample(g, dusk)
+    assert (r.gallery_slot, r.gallery_source, r.admitted) == (1, "auto", False)
+
+    night = _provider([(night_gray(), [], 8)] * 2)
+    notices = [dev.sample(g, night).notice for _ in range(6)]
+    assert notices == [False] * 4 + [True, False]
+    assert g.count == 2
+
+
 def test_provider_exception_propagates(core):
-    ref = core.new_reference()
-    ref.build(dry_gray())
+    ref = core.new_gallery()
+    ref.add_manual(dry_gray())
 
     def broken(attempt):
         raise ValueError("boom")

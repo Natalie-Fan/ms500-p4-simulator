@@ -24,3 +24,14 @@ void synth_flooded(uint8_t *gray)
     for (int y = SYNTH_FLOOD_Y0; y < SYNTH_FLOOD_Y1; ++y)
         memset(gray + (size_t)y * SYNTH_W, 128, SYNTH_W);
 }
+
+void synth_relit(uint8_t *gray, int dry_weight, int other_weight, int seed)
+{
+    synth_dry(gray);
+    const int total = dry_weight + other_weight;
+    for (int y = SYNTH_FLOOD_Y0; y < SYNTH_FLOOD_Y1; ++y)
+        for (int x = 0; x < SYNTH_W; ++x) {
+            uint8_t *p = gray + (size_t)y * SYNTH_W + x;
+            *p = (uint8_t)((dry_weight * *p + other_weight * texture(x + seed, y + 2 * seed)) / total);
+        }
+}

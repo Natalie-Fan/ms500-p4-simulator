@@ -82,7 +82,8 @@ ignores changes in brightness and contrast.
 
 | Term | Meaning |
 |---|---|
-| **Dry reference** | A frame of the same scene when it was dry. Everything is compared against it. On the device it is captured by "Capture Baseline". |
+| **Dry reference** | A frame of the same scene when it was dry. On the device it is captured by "Capture Baseline". |
+| **Reference gallery** | Up to 8 dry references, so a frame is compared against whichever one matches the current lighting (day, dusk, night…). Every frame is scored against all of them and the best match counts. **Manual** references are the ones you add; the device adds **learned** (auto) ones itself when a sample is confidently dry (0.65 ≤ correlation < 0.95) but not yet well covered. After 5 samples in a row between 0.45 and 0.65, it logs a *no confident match* notice: time to capture a baseline for that lighting. |
 | **Geometry** | Two lines you place on the image: the **curb line** (the curb's foot) and the **lane line** (below it, on the road). The sampled **kerb strip** is derived from them. |
 | **Correlation** | −1 … 1. It measures how much the curb strip still looks like the dry reference. **Below 0.45 = submerged.** |
 | **Severity** | From correlation: `none` ≥ 0.45 > `minor` ≥ 0.05 > `moderate` ≥ −0.10 > `severe`. |
@@ -188,12 +189,17 @@ to the window.
 ### First steps
 
 1. **Open** footage: **File ▸ Open video / image / folder**.
-2. **Set a dry reference.** Either:
-   - go to a frame where the street is dry, then **Reference ▸ Set from current frame** (or the
-     *Set reference* button); or
-   - **Reference ▸ Load image…**, e.g. `dataset/dry_reference_full.jpg`.
+2. **Add a dry reference.** Either:
+   - go to a frame where the street is dry, then **Reference ▸ Add current frame** (or the
+     *Add reference* button); or
+   - **Reference ▸ Add image…**, e.g. `dataset/dry_reference_full.jpg`.
 
-   Every frame you visit is now scored, and the verdict panel shows the result.
+   Every frame you visit is now scored, and the verdict panel shows the result. Adding another
+   reference (say, a dusk frame) **adds** it to the gallery rather than replacing the first. The
+   *Gallery* line lists what is in it; **Reference ▸ Clear all references** empties it.
+   **View ▸ Show reference ▸ *n*** shows manual reference *n* in the main view, with the curb/lane
+   overlays, in the grayscale the firmware compares against. Moving to any frame (or **Off**)
+   returns to the footage. Learned references are not listed: they keep no image.
 3. **Check the lines.** If the red and blue lines don't sit on the curb and road in your footage,
    fix them first (next section). Everything depends on them.
 
@@ -201,10 +207,10 @@ to the window.
 
 | Button | What it does |
 |---|---|
-| **Sample** | A full device sample at the current frame. If it is obstructed, it retries on the frame 1 s later. It advances the heartbeat counter and adds a row to *Samples*. |
-| **Score** | Stage 1 (veto) + Stage 2 (curb check) on this frame only. The device state is untouched. |
-| **Set reference** | This frame becomes the dry reference. |
-| **Reset state** | Sets the heartbeat counter ("since image") back to 0. |
+| **Sample** | A full device sample at the current frame. If it is obstructed, it retries on the frame 1 s later. It advances the heartbeat counter, adds a row to *Samples*, and **can learn a reference**, as the device does. *Matched* in the verdict panel shows which slot matched and whether a reference was learned or a *no confident match* notice fired. |
+| **Score** | Stage 1 (veto) + Stage 2 (curb check) on this frame only, against the whole gallery. The device state is untouched and nothing is learned. |
+| **Add reference** | Adds this frame to the gallery as a manual reference (the device's Capture Baseline). |
+| **Reset state** | Sets the heartbeat counter ("since image") back to 0 and **forgets learned references**; manual ones stay. |
 
 ### Tuning the curb and lane lines
 
@@ -214,7 +220,8 @@ to the window.
    overlap too little horizontally, you get the firmware's error message and the line snaps back.
 4. After an edit, the reference is **stale**: it was built under the old lines. A yellow banner
    says so. As on the device, **the old reference keeps being used** until you click
-   **Rebuild reference**.
+   **Rebuild reference**. Rebuilding rebuilds the manual references and drops learned ones: no
+   frame is kept for them, here or on the device.
 5. **Geometry ▸ Save…** writes the lines as JSON, in the same shape as the camera's web API. You can
    copy the values to the device, or reuse them with `floodsim run --geometry`.
    **Geometry ▸ Reset to firmware default** undoes all edits.
@@ -234,8 +241,14 @@ to the window.
 
 ### Batch runs
 
-- **Run ▸ Device run…** asks for the sample period (default 60 s) and the retry gap (default 1 s).
-- **Run ▸ Dense run…** asks for "score every Nth frame".
+- **Run ▸ Device run…** asks for the sample period (default: the firmware's 60 s) and the retry
+  gap (default 1 s). **On a short clip, shorten the period** (e.g. 5 s): at 60 s a 5-minute clip
+  gives only 5 samples, too few to see references being learned or the 5-sample notice.
+- **Run ▸ Dense run…** asks for "score every Nth frame". Dense runs never learn references.
+
+**Every batch run starts from your manual references only.** What a device run learns shows in its
+rows (`admitted`, `gallery_count`) and is then discarded, so the same inputs always give the same
+results. References learned by manual *Sample* clicks are not used by batch runs either.
 
 A progress bar and **Cancel** appear. When the run finishes, results appear in the plot and the
 *Samples* table. **Double-click a row** to jump to its frame. The status bar reports:
@@ -266,7 +279,7 @@ Use the command line for anything repeatable: evaluations, regression checks, sc
 ### `floodsim run`: a device or dense run
 
 ```bash
-floodsim run INPUT [--mode device|dense] (--reference IMG | --reference-at SECONDS)
+floodsim run INPUT [--mode device|dense] [--reference IMG ...] [--reference-at SECONDS ...]
                    [--geometry GEO.json] [--labels LABELS.csv] [--out DIR]
                    [--period 60] [--retry-gap 1] [--every 1]
                    [--no-detector] [--model models/traffic.onnx] [--conf 0.5]
@@ -276,11 +289,11 @@ floodsim run INPUT [--mode device|dense] (--reference IMG | --reference-at SECON
 | Option | Meaning |
 |---|---|
 | `--mode` | `device` (default) or `dense` |
-| `--reference` / `--reference-at` | Dry reference: an image file, or the input's own frame at that time. Dense mode requires one. Device mode without one reports every sample as `skipped_no_ref`, as the device would. |
+| `--reference` / `--reference-at` | Manual dry references: image files, or the input's own frames at those times. Both can be repeated and combined (up to 8 in total), e.g. one per lighting condition. Dense mode requires at least one. Device mode without one reports every sample as `skipped_no_ref`, as the device would. |
 | `--geometry` | Curb/lane lines (JSON, §7). The default is the firmware's built-in lines. |
 | `--labels` | Score the results against ground truth (§7) |
 | `--out` | Output folder. The default is `out/<input>-<mode>-<timestamp>`. It must not already contain files. |
-| `--period`, `--retry-gap` | Device mode timing |
+| `--period`, `--retry-gap` | Device mode timing. `--period` defaults to the firmware's 60 s; shorten it to get more samples (and more reference learning) out of a short clip. |
 | `--every` | Dense mode: score every Nth frame |
 | `--no-detector` | No obstruction boxes at all, including edited ones |
 | `--model`, `--conf` | Detection model (`.onnx`: the device's traffic model; `.pt`: an ultralytics YOLO) and score threshold. The defaults match the device: `models/traffic.onnx`, 0.5, NMS 0.20 across classes, motorcycles dropped. |
@@ -297,6 +310,9 @@ floodsim run clip.avi --mode dense --reference dry.jpg --labels clip.labels.csv
 
 # Custom geometry, every 4th frame
 floodsim run clip.avi --mode dense --reference dry.jpg --geometry site42.json --every 4
+
+# Day and night baselines; sample every 5 s to see learning on a short clip
+floodsim run dusk.avi --reference noon.jpg --reference night.jpg --period 5
 ```
 
 ### `floodsim detect`: fill the box cache in advance
@@ -316,7 +332,8 @@ input file (name, size, modification time); if any of those change, it is set as
 floodsim compare out/before out/after
 ```
 
-This lists every sample where the outcome, severity, chosen frame, veto, or submerged flag differs,
+This lists every sample where the outcome, severity, chosen frame, veto, submerged flag, matched
+gallery slot, or learned/notice flag differs,
 or where the correlation differs by more than 1e-6. It exits with code 1 if anything differs and 0
 if the runs are identical, so you can use it in scripts. Each argument can be a run folder, a
 `samples.csv`, or `flood_sim.exe` output (`.jsonl`).
@@ -328,7 +345,8 @@ floodsim export clip.avi --reference dry.jpg --out out/exp [--every 1] [--no-det
 ```
 
 This writes `frames/f<idx>_t<ms>.pgm` (grayscale, converted exactly as the camera does),
-`boxes.csv`, and `reference.pgm`.
+`boxes.csv`, and `reference.pgm`. Repeat `--reference` for more: they become `reference_1.pgm`,
+`reference_2.pgm`, and so on.
 
 ### `floodsim gui`
 
@@ -348,7 +366,7 @@ build/native/flood_sim.exe --reference out/exp/reference.pgm --frames out/exp/fr
 floodsim compare out/some-python-run out/exe.jsonl        # expect 0 differences
 ```
 
-Options: `--reference R.pgm --frames DIR|LIST [--boxes B.csv] [--geometry G.json]
+Options: `--reference R.pgm [--reference R2.pgm ...] --frames DIR|LIST [--boxes B.csv] [--geometry G.json]
 [--mode device|dense] [--period 60] [--retry-gap 1] [--every 1] [--fps 1]`.
 It prints one JSON line per sample, with the same fields as `samples.csv`. It reads only 1920×1080
 PGM frames and does no video decoding and no detection. Keep its paths ASCII.
@@ -363,19 +381,23 @@ PGM frames and does no video decoding and no detection. Keep its paths ASCII.
 |---|---|
 | `run.json` | Everything needed to reproduce the run: input (path, size, modification time), mode, parameters, geometry, reference source, box source, firmware commit and whether its flood code had uncommitted edits, and DLL version. GUI exports also record `cancelled` and `frames_without_boxes`. |
 | `samples.csv` | One row per sample (device mode) or per scored frame (dense mode); columns below |
-| `summary.txt` | Outcome counts, failed frame reads, and scoring when labels were given |
+| `summary.txt` | Outcome counts, failed frame reads, references learned, *no confident match* notices, gallery size at the end (device mode), and scoring when labels were given |
 | `uploads/` | Device mode only: the images the camera would have sent, named `<sample>_<label>.jpg`. Half resolution, with a 6-hex ID burned in, as on the device. |
 
 **`samples.csv`, device mode:** `sample, t_sec, frame_idx, outcome, frames_taken, has_reading,
 curb_correlation, severity, shift_dx, shift_dy, veto_usable, veto_coverage, veto_worst_class,
-since_image` (+ `label`).
+since_image, gallery_slot, gallery_source, admitted, notice, gallery_count` (+ `label`).
 
 - `t_sec` is the sample time.
 - `frame_idx` is the frame actually used; −1 means no frame was available.
 - `curb_correlation` is only meaningful when `has_reading` is true.
+- `gallery_slot` / `gallery_source` are the reference that matched (`manual` or `auto`); −1 /
+  `none` without a reading.
+- `admitted` is true when this sample learned a new reference; `notice` when it raised the
+  *no confident match* notice; `gallery_count` is the gallery size after the sample.
 
 **`samples.csv`, dense mode:** `frame_idx, t_sec, veto_usable, veto_coverage, veto_worst_class,
-curb_correlation, submerged, severity, shift_dx, shift_dy` (+ `label`).
+curb_correlation, submerged, severity, shift_dx, shift_dy, gallery_slot` (+ `label`).
 
 ### Scoring (`summary.txt`)
 
@@ -467,11 +489,29 @@ numbers.
 
 ### Set up the lines for a new camera site
 
-1. `floodsim gui site.avi`, go to a dry frame, click **Set reference**.
+1. `floodsim gui site.avi`, go to a dry frame, click **Add reference**.
 2. Use **Edit curb line** / **Edit lane line** until the yellow strip covers the curb face.
    Click **Rebuild reference**.
 3. Scrub through the clip and watch the plot: dry and wet frames should stay above 0.45.
 4. **Geometry ▸ Save…** → `site.json`. Enter the same values in the camera's web UI.
+
+### Test lighting changes (the reference gallery)
+
+1. Pick a clip whose lighting changes, and a dry baseline from another time of day.
+2. Device run with a short period, so a short clip gives enough samples:
+
+   ```bash
+   floodsim run dusk.avi --reference noon.jpg --period 5 --out out/dusk
+   ```
+3. In `summary.txt`: *references learned* shows the gallery adapting on its own, and
+   *no-confident-match notices* shows lighting it could not cover. In `samples.csv`, rows with
+   `admitted=true` are where it learned, and `gallery_slot` shows which reference each sample then
+   used.
+4. If notices fire, add a baseline for that lighting (`--reference night.jpg`, or **Add
+   reference** in the GUI) and run again: the notices should stop and correlation should rise.
+
+The same works in the GUI: add a reference, set the period in **Run ▸ Device run…**, and watch the
+*slot / learned / notice / refs* columns in the samples table.
 
 ### Find out why a frame was judged a flood
 
@@ -495,7 +535,8 @@ numbers.
 - **Device glue** (`flood_task.c`, `flood_frame_tap.c`, `flood_roi.h`,
   `flood_geometry_config.c`): these files depend on the RTOS and camera, so the simulator
   **copies** a few values from them instead of compiling them: the 60 s period, the grayscale
-  formula, the default lines, the geometry checks, and the upload scale. All of them are listed,
+  formula, the default lines, the geometry checks, the upload scale, and the per-sample gallery
+  bookkeeping order (skip when the gallery is empty; learn after each reading). All of them are listed,
   with their source file and line, in `native/device_constants.h`. If those firmware files change,
   compare that list by hand.
 
@@ -513,6 +554,8 @@ numbers.
 | `dense mode needs --reference or --reference-at` | Give a dry reference. |
 | `… already exists and is not empty; choose another --out` | Runs never overwrite each other. Pick a new folder. |
 | `geometry leaves no usable sampling window` | The lines overlap too little horizontally. Widen them. |
+| `reference gallery is full of manual baselines` | 8 manual references is the firmware's limit. Clear some (GUI: **Reference ▸ Clear all references**). |
+| No references learned on a short clip | Too few samples at the 60 s period. Use `--period 5` (GUI: the period in **Run ▸ Device run…**). |
 | Every device sample is `skipped_no_ref` | No reference was given. |
 | Lots of `blocked` samples | The obstruction veto is firing. Look at the boxes in the GUI. With a single image or sparse stills, the "retry" re-reads the same frame, so it can't pass. |
 | GUI status: "N frame(s) had no boxes" | No detector and no cache for those frames, so their veto is missing. |

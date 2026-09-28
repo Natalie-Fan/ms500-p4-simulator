@@ -7,7 +7,7 @@ from floodsim.boxes import DEFAULT_CONF, DEFAULT_MODEL, BoxStore, CachedBox, cac
 from floodsim.cli import main
 from floodsim.report import compare_runs, read_samples
 from floodsim.source import open_source, write_image
-from tests.synth import dry_gray, flooded_gray, to_rgb, write_frame_folder
+from tests.synth import dry_gray, dusk_gray, flooded_gray, to_rgb, write_frame_folder
 
 CAR = CachedBox(0.0, 0.0, 1919.0, 1079.0, 0.9, "car", 2)
 
@@ -71,11 +71,38 @@ def test_compare_exit_codes(scenario):
     assert main(["compare", str(tmp / "a"), str(tmp / "c")]) == 1
 
 
-def test_run_rejects_both_reference_options(scenario, capsys):
+def test_run_takes_several_manual_references(scenario):
+    import json
     folder, ref, tmp = scenario
-    assert main(["run", str(folder), "--reference", str(ref), "--reference-at", "0",
-                 "--out", str(tmp / "x")]) == 2
-    assert "not both" in capsys.readouterr().err
+    dusk = tmp / "dusk.png"
+    write_image(dusk, to_rgb(dusk_gray()))
+    assert main(["run", str(folder), "--reference", str(dusk), "--reference-at", "0",
+                 "--out", str(tmp / "x")]) == 0
+    info = json.loads((tmp / "x" / "run.json").read_text())
+    assert [m["kind"] for m in info["reference"]["manual"]] == ["image", "frame"]
+    rows = read_samples(tmp / "x")
+    # Dry frames match the dry baseline (slot 1) exactly, so nothing new is learned.
+    assert [rows[0]["gallery_slot"], rows[2]["gallery_slot"]] == ["1", "1"]
+    assert {r["gallery_count"] for r in rows} == {"2"}
+    assert "references learned: 0" in (tmp / "x" / "summary.txt").read_text()
+
+
+def test_export_and_exe_with_two_references(scenario):
+    folder, ref, tmp = scenario
+    dusk = tmp / "dusk.png"
+    write_image(dusk, to_rgb(dusk_gray()))
+    args = ["--reference", str(ref), "--reference", str(dusk)]
+    assert main(["run", str(folder), *args, "--out", str(tmp / "py")]) == 0
+    assert main(["export", str(folder), *args, "--out", str(tmp / "exp")]) == 0
+    assert (tmp / "exp" / "reference.pgm").exists() and (tmp / "exp" / "reference_1.pgm").exists()
+    exe = core_mod.BUILD_DIR / core_mod.EXE_NAME
+    p = subprocess.run([str(exe), "--reference", str(tmp / "exp" / "reference.pgm"),
+                        "--reference", str(tmp / "exp" / "reference_1.pgm"),
+                        "--frames", str(tmp / "exp" / "frames"), "--boxes", str(tmp / "exp" / "boxes.csv")],
+                       capture_output=True, text=True)
+    assert p.returncode == 0, p.stderr
+    (tmp / "exe.jsonl").write_text(p.stdout)
+    assert compare_runs(tmp / "py", tmp / "exe.jsonl") == []
 
 
 def test_dense_without_reference_errors(scenario, capsys):

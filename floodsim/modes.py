@@ -36,14 +36,17 @@ def device_row(sample: int, t: float, r: DeviceResult) -> dict:
             "curb_correlation": r.curb_correlation, "severity": r.severity,
             "shift_dx": r.shift_dx, "shift_dy": r.shift_dy, "veto_usable": r.veto_usable,
             "veto_coverage": r.veto_coverage, "veto_worst_class": r.veto_worst_class,
-            "since_image": r.since_image}
+            "since_image": r.since_image, "gallery_slot": r.gallery_slot,
+            "gallery_source": r.gallery_source, "admitted": r.admitted, "notice": r.notice,
+            "gallery_count": r.gallery_count}
 
 
 def dense_row(idx: int, t: float, s: ScoreResult) -> dict:
     return {"frame_idx": idx, "t_sec": t, "veto_usable": s.veto_usable,
             "veto_coverage": s.veto_coverage, "veto_worst_class": s.veto_worst_class,
             "curb_correlation": s.curb_correlation, "submerged": s.submerged,
-            "severity": s.severity, "shift_dx": s.shift_dx, "shift_dy": s.shift_dy}
+            "severity": s.severity, "shift_dx": s.shift_dx, "shift_dy": s.shift_dy,
+            "gallery_slot": s.gallery_slot}
 
 
 class FrameFeeder:
@@ -77,7 +80,7 @@ def sample_device_at(device, ref, feeder: FrameFeeder, t: float, retry_gap: floa
 
 class UploadWriter:
     """What the camera would send: the frame decimated by FLOOD_ROI_DOWNSCALE with a
-    6-hex sequence label (flood_roi_composite + flood_report_upload, flood_task.c:221).
+    6-hex sequence label (flood_roi_composite + flood_report_upload, flood_task.c:228).
     Encoded by OpenCV and labelled with an OpenCV font, so not byte-identical to the P4."""
 
     def __init__(self, out_dir: Path, downscale: int):

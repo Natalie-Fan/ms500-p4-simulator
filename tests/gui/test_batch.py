@@ -27,7 +27,7 @@ def _ready(qtbot, win, folder):
     win.open_path(folder, no_detector=True)
     qtbot.waitUntil(lambda: win._last_frame is not None, timeout=T)
     win.tools.set_reference_btn.click()
-    qtbot.waitUntil(lambda: win.verdict.reference_label.text().startswith("frame"), timeout=T)
+    qtbot.waitUntil(lambda: "manual: frame" in win.verdict.reference_label.text(), timeout=T)
 
 
 def test_dense_run_fills_plot_and_table(qtbot, tmp_path, window):

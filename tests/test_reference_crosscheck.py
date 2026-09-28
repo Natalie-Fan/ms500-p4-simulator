@@ -27,7 +27,7 @@ def test_correlation_matches_python_reference(core, frame):
     from ms500.curbcheck import CurbCheck
 
     ref_gray, gray = _gray(core, DRY), _gray(core, frame)
-    ref = core.new_reference()
-    assert ref.build(ref_gray)
+    ref = core.new_gallery()
+    ref.add_manual(ref_gray)
     python = CurbCheck(ref_gray, register=False).check(gray).correlation
-    assert core.correlation_at(ref, gray, 0, 0) == pytest.approx(python, abs=1e-5)
+    assert core.correlation_at(ref, 0, gray, 0, 0) == pytest.approx(python, abs=1e-5)

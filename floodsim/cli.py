@@ -39,11 +39,15 @@ def build_parser() -> argparse.ArgumentParser:
     add_input(run)
     add_boxes(run)
     run.add_argument("--mode", choices=["device", "dense"], default="device")
-    run.add_argument("--reference", type=Path, help="dry reference image")
-    run.add_argument("--reference-at", type=float, help="use the input's frame at this time (s) as reference")
+    run.add_argument("--reference", type=Path, action="append", default=[],
+                     help="dry reference image; repeat for more manual baselines (e.g. day, dusk, night)")
+    run.add_argument("--reference-at", type=float, action="append", default=[],
+                     help="use the input's frame at this time (s) as a manual baseline; repeatable")
     run.add_argument("--geometry", type=Path, help="curb/lane geometry JSON")
     run.add_argument("--labels", type=Path, help="labels CSV to score against")
-    run.add_argument("--period", type=float, help="device sample period in s (default: firmware's)")
+    run.add_argument("--period", type=float,
+                     help="device sample period in s (default: firmware's 60); shorten it to get "
+                          "more samples, and so more gallery learning, out of a short clip")
     run.add_argument("--retry-gap", type=float, default=1.0)
     run.add_argument("--every", type=int, default=1, help="dense: score every Nth frame")
     run.add_argument("--no-rebuild", action="store_true", help="use the existing DLL even if stale")
@@ -64,7 +68,8 @@ def build_parser() -> argparse.ArgumentParser:
     add_boxes(exp)
     exp.add_argument("--out", type=Path, required=True)
     exp.add_argument("--every", type=int, default=1)
-    exp.add_argument("--reference", type=Path, help="also write reference.pgm from this image")
+    exp.add_argument("--reference", type=Path, action="append", default=[],
+                     help="also write reference.pgm from this image; repeat for reference_1.pgm, ...")
     exp.add_argument("--no-rebuild", action="store_true")
 
     gui = sub.add_parser("gui", help="open the GUI")
@@ -76,28 +81,31 @@ def build_parser() -> argparse.ArgumentParser:
     return p
 
 
-def build_reference(core, source, reference: Path | None, reference_at: float | None,
+def _reference_image_rgb(path: Path, allow_stretch: bool):
+    bgr = read_image_bgr(path)
+    if bgr is None:
+        raise FloodSimError(f"cannot read reference image {path}")
+    return Normalizer(allow_stretch)(bgr, str(path))
+
+
+def build_reference(core, source, references: list[Path], reference_at: list[float],
                     allow_stretch: bool):
-    if reference is not None and reference_at is not None:
-        raise FloodSimError("use --reference or --reference-at, not both")
-    if reference is not None:
-        bgr = read_image_bgr(reference)
-        if bgr is None:
-            raise FloodSimError(f"cannot read reference image {reference}")
-        rgb = Normalizer(allow_stretch)(bgr, str(reference))
-        info = {"kind": "image", "path": str(reference)}
-    elif reference_at is not None:
-        idx = source.index_at(reference_at)
+    """A gallery with one manual baseline per --reference image, then per --reference-at frame."""
+    manual = []
+    for path in references:
+        manual.append((_reference_image_rgb(path, allow_stretch), {"kind": "image", "path": str(path)}))
+    for t in reference_at:
+        idx = source.index_at(t)
         rgb = source.read_rgb(idx) if idx is not None else None
         if rgb is None:
-            raise FloodSimError(f"no readable frame at {reference_at} s for the reference")
-        info = {"kind": "frame", "t_sec": reference_at, "frame_idx": idx}
-    else:
+            raise FloodSimError(f"no readable frame at {t} s for the reference")
+        manual.append((rgb, {"kind": "frame", "t_sec": t, "frame_idx": idx}))
+    if not manual:
         return None, {"kind": "none"}
-    ref = core.new_reference()
-    if not ref.build(core.rgb_to_gray(rgb)):
-        raise FloodSimError("geometry leaves no usable sampling window")
-    return ref, info
+    gallery = core.new_gallery()
+    for rgb, _ in manual:
+        gallery.add_manual(core.rgb_to_gray(rgb))
+    return gallery, {"kind": "gallery", "manual": [info for _, info in manual]}
 
 
 def _apply_geometry(core, path: Path | None) -> Geometry:
@@ -189,12 +197,9 @@ def cmd_export(args) -> int:
         write_image(frames_dir / f"f{idx:06d}_t{round(t * 1000):010d}.pgm", core.rgb_to_gray(rgb))
         entries.append((idx, t, boxes.cached_for(idx, t, lambda: rgb)))
     write_boxes_csv(out / "boxes.csv", entries, {"export": str(args.input)})
-    if args.reference:
-        ref_bgr = read_image_bgr(args.reference)
-        if ref_bgr is None:
-            raise FloodSimError(f"cannot read reference image {args.reference}")
-        rgb = Normalizer(args.allow_stretch)(ref_bgr, str(args.reference))
-        write_image(out / "reference.pgm", core.rgb_to_gray(rgb))
+    for i, path in enumerate(args.reference):
+        name = "reference.pgm" if i == 0 else f"reference_{i}.pgm"
+        write_image(out / name, core.rgb_to_gray(_reference_image_rgb(path, args.allow_stretch)))
     print(f"wrote {len(entries)} frames to {frames_dir}")
     return 0
 

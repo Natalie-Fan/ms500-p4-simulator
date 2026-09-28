@@ -32,7 +32,15 @@ checkout: `export FLOOD_FIRMWARE_DIR=/d/path/to/firmware`.
 .venv/Scripts/floodsim export clip.avi --reference dry.jpg --out out/exp
 build/native/flood_sim.exe --reference out/exp/reference.pgm --frames out/exp/frames \
     --boxes out/exp/boxes.csv --mode dense
+# lighting: several manual baselines, 5 s samples so a short clip shows the gallery learning
+.venv/Scripts/floodsim run clip.avi --reference noon.jpg --reference night.jpg --period 5
 ```
+
+References form the firmware's **reference gallery** (`flood_gallery.c`, up to 8): each frame is
+scored against all of them and the best match counts. Device mode also learns references the way
+the device does (confidently dry but not yet covered) and flags a run of unmatched samples; see the
+`gallery_slot`, `admitted`, `notice` and `gallery_count` columns and `summary.txt`. Dense mode never
+learns. Every run starts from the manual references only.
 
 Stage-1 boxes come from the device's traffic model at `models/traffic.onnx` (not in git;
 copy it there). Without it or `onnxruntime`, pass `--no-detector` (no obstruction veto) or have a complete
@@ -52,12 +60,14 @@ Layout: tools (left) · frame with overlays (centre) · verdict and device state
 correlation-over-time plot aligned with the scrubber (bottom; click it to jump) · samples table.
 
 - **Manual mode:** *Sample* runs the full firmware capture (retry on a frame 1 s later, heartbeat
-  counter carries over); *Score* scores this frame only; *Set reference* makes this frame the dry
-  reference; *Reset state* clears the heartbeat counter.
+  counter carries over, may learn a reference); *Score* scores this frame only; *Add reference*
+  adds this frame to the gallery as a manual baseline; *Reset state* clears the heartbeat counter
+  and forgets learned references. Reference ▸ Clear all references empties the gallery;
+  View ▸ Show reference displays a manual reference (with overlays) until you move to a frame.
 - **Editing:** drag curb/lane endpoints (the reference is then marked stale, as on the device, until
   you rebuild it); draw or delete obstruction boxes (saved to `<input>.boxes.edited.csv`, dashed).
-- **Batch:** Run ▸ Device/Dense runs the same runners as the CLI; File ▸ Export run writes the same
-  run folder as `floodsim run`.
+- **Batch:** Run ▸ Device/Dense runs the same runners as the CLI (the device run dialog sets the
+  sample period, default 60 s); File ▸ Export run writes the same run folder as `floodsim run`.
 - All simulator calls run on one background thread; a long batch run delays frame updates until it
   finishes or is cancelled.
 

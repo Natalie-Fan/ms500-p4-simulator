@@ -4,7 +4,7 @@ from __future__ import annotations
 import ctypes
 import os
 import subprocess
-from ctypes import POINTER, byref, c_char_p, c_float, c_int32, c_uint8, c_void_p
+from ctypes import POINTER, byref, c_char_p, c_float, c_int32, c_uint8, c_uint32, c_void_p
 from pathlib import Path
 from typing import Callable
 
@@ -22,7 +22,7 @@ FLOOD_SUBDIR = "components/as_code/process_flood_detection"
 DLL_NAME = "flood_core.dll"
 EXE_NAME = "flood_sim.exe"
 STAMP_NAME = "floodsim.stamp"
-ABI_VERSION = 2
+ABI_VERSION = 3
 FRAME_W, FRAME_H = 1920, 1080
 MAX_BOXES = 32
 
@@ -134,14 +134,24 @@ class _SimBox(ctypes.Structure):
 class _SimScore(ctypes.Structure):
     _fields_ = [("veto_usable", c_int32), ("veto_coverage", c_float), ("veto_worst_class", c_int32),
                 ("curb_correlation", c_float), ("submerged", c_int32), ("severity", c_int32),
-                ("shift_dx", c_int32), ("shift_dy", c_int32)]
+                ("shift_dx", c_int32), ("shift_dy", c_int32), ("gallery_slot", c_int32)]
 
 
 class _SimResult(ctypes.Structure):
     _fields_ = [("outcome", c_int32), ("frames_taken", c_int32), ("has_reading", c_int32),
                 ("curb_correlation", c_float), ("severity", c_int32), ("shift_dx", c_int32),
                 ("shift_dy", c_int32), ("veto_usable", c_int32), ("veto_coverage", c_float),
-                ("veto_worst_class", c_int32), ("since_image", c_int32), ("frame_idx", c_int32)]
+                ("veto_worst_class", c_int32), ("since_image", c_int32), ("frame_idx", c_int32),
+                ("gallery_slot", c_int32), ("gallery_source", c_int32), ("admitted", c_int32),
+                ("notice", c_int32), ("gallery_count", c_int32)]
+
+
+# flood_ref_source_t order, flood_gallery.h
+SOURCE_NAMES = ("manual", "auto")
+
+
+def source_name(v: int) -> str:
+    return SOURCE_NAMES[v] if 0 <= v < len(SOURCE_NAMES) else "none"
 
 
 _PROVIDER_FN = ctypes.CFUNCTYPE(c_int32, c_int32, POINTER(c_uint8), POINTER(_SimBox),
@@ -206,11 +216,14 @@ class Core:
         fn("sim_align_patch", None, POINTER(c_int32))
         fn("sim_strip_outline", c_int32, _FP, _FP, _FP, c_int32)
         fn("sim_rgb_to_gray", None, _U8P, c_int32, c_int32, _U8P)
-        fn("sim_ref_new", c_void_p)
-        fn("sim_ref_free", None, c_void_p)
-        fn("sim_ref_build", c_int32, c_void_p, _U8P)
-        fn("sim_ref_ready", c_int32, c_void_p)
-        fn("sim_correlation_at", c_float, c_void_p, _U8P, c_int32, c_int32)
+        fn("sim_gallery_new", c_void_p)
+        fn("sim_gallery_free", None, c_void_p)
+        fn("sim_gallery_clear", None, c_void_p)
+        fn("sim_gallery_max_slots", c_int32)
+        fn("sim_gallery_count", c_int32, c_void_p)
+        fn("sim_gallery_add_manual", c_int32, c_void_p, _U8P)
+        fn("sim_gallery_slot", c_int32, c_void_p, c_int32, POINTER(c_int32), POINTER(c_uint32))
+        fn("sim_correlation_at", c_float, c_void_p, c_int32, _U8P, c_int32, c_int32)
         fn("sim_box_from_accelerator", None, c_float, c_float, c_float, c_float, c_float,
            c_int32, c_int32, c_int32, POINTER(_SimBox))
         fn("sim_score", c_int32, c_void_p, _U8P, POINTER(_SimBox), c_int32, POINTER(_SimScore))
@@ -279,10 +292,11 @@ class Core:
         self._lib.sim_rgb_to_gray(_u8(rgb), w, h, _u8(out))
         return out
 
-    def new_reference(self) -> Reference:
-        return Reference(self)
+    def new_gallery(self) -> Gallery:
+        return Gallery(self)
 
-    def score(self, ref: Reference | None, gray: np.ndarray, boxes: list[Box]) -> ScoreResult:
+    def score(self, ref: Gallery | None, gray: np.ndarray, boxes: list[Box]) -> ScoreResult:
+        """Read-only: the best-matching slot's score; never admits a reference."""
         if ref is None or not ref.ready:
             raise FloodSimError("no dry reference: set one before scoring")
         gray = _check_gray(gray)
@@ -293,10 +307,11 @@ class Core:
             veto_usable=bool(s.veto_usable), veto_coverage=s.veto_coverage,
             veto_worst_class=self.class_name(s.veto_worst_class),
             curb_correlation=s.curb_correlation, submerged=bool(s.submerged),
-            severity=self.severity_name(s.severity), shift_dx=s.shift_dx, shift_dy=s.shift_dy)
+            severity=self.severity_name(s.severity), shift_dx=s.shift_dx, shift_dy=s.shift_dy,
+            gallery_slot=s.gallery_slot)
 
-    def correlation_at(self, ref: Reference, gray: np.ndarray, dx: int, dy: int) -> float:
-        return self._lib.sim_correlation_at(ref.ptr, _u8(_check_gray(gray)), dx, dy)
+    def correlation_at(self, ref: Gallery, slot: int, gray: np.ndarray, dx: int, dy: int) -> float:
+        return self._lib.sim_correlation_at(ref.ptr, slot, _u8(_check_gray(gray)), dx, dy)
 
     def box_from_accelerator(self, x0, y0, x1, y1, conf, cls, input_w, input_h) -> Box:
         b = _SimBox()
@@ -313,35 +328,60 @@ class Core:
             severity=self.severity_name(r.severity), shift_dx=r.shift_dx, shift_dy=r.shift_dy,
             veto_usable=bool(r.veto_usable), veto_coverage=r.veto_coverage,
             veto_worst_class=self.class_name(r.veto_worst_class), since_image=r.since_image,
-            frame_idx=r.frame_idx)
+            frame_idx=r.frame_idx, gallery_slot=r.gallery_slot,
+            gallery_source=source_name(r.gallery_source), admitted=bool(r.admitted),
+            notice=bool(r.notice), gallery_count=r.gallery_count)
 
 
-class Reference:
-    """Opaque firmware flood_reference_t, built from a dry gray frame."""
+class Gallery:
+    """Opaque firmware flood_gallery_t: manual dry references, plus AUTO ones that
+    Device.sample() admits the way flood_task.c does each sampling cycle."""
 
     def __init__(self, core: Core):
         self._core = core
-        self.ptr = core._lib.sim_ref_new()
+        self.ptr = core._lib.sim_gallery_new()
         if not self.ptr:
-            raise MemoryError("sim_ref_new failed")
+            raise MemoryError("sim_gallery_new failed")
         self.geometry: tuple[float, ...] | None = None
 
-    def build(self, gray: np.ndarray) -> bool:
-        ok = bool(self._core._lib.sim_ref_build(self.ptr, _u8(_check_gray(gray))))
-        self.geometry = tuple(self._core.get_geometry()) if ok else None
-        return ok
+    def add_manual(self, gray: np.ndarray) -> None:
+        """flood_do_calibration(): build a reference from a dry frame and add it as MANUAL."""
+        rc = self._core._lib.sim_gallery_add_manual(self.ptr, _u8(_check_gray(gray)))
+        if rc == 0:
+            raise FloodSimError("geometry leaves no usable sampling window")
+        if rc < 0:
+            raise FloodSimError(f"reference gallery is full of manual baselines "
+                                f"(max {self._core._lib.sim_gallery_max_slots()})")
+        self.geometry = tuple(self._core.get_geometry())
+
+    def clear(self) -> None:
+        self._core._lib.sim_gallery_clear(self.ptr)
+        self.geometry = None
+
+    @property
+    def count(self) -> int:
+        return self._core._lib.sim_gallery_count(self.ptr) if self.ptr else 0
 
     @property
     def ready(self) -> bool:
-        return bool(self.ptr) and bool(self._core._lib.sim_ref_ready(self.ptr))
+        return self.count > 0
+
+    def slots(self) -> list[tuple[int, str, int]]:
+        """In-use slots as (index, "manual"|"auto", last_matched_cycle)."""
+        out = []
+        source, last = c_int32(), c_uint32()
+        for i in range(self._core._lib.sim_gallery_max_slots()):
+            if self._core._lib.sim_gallery_slot(self.ptr, i, byref(source), byref(last)):
+                out.append((i, source_name(source.value), last.value))
+        return out
 
     def is_stale(self) -> bool:
-        """Built under different geometry than the current one (firmware: geometry_version)."""
+        """Last manual reference built under different geometry (firmware: geometry_version)."""
         return self.ready and self.geometry != tuple(self._core.get_geometry())
 
     def close(self) -> None:
         if self.ptr:
-            self._core._lib.sim_ref_free(self.ptr)
+            self._core._lib.sim_gallery_free(self.ptr)
             self.ptr = None
 
     def __del__(self):
@@ -360,7 +400,8 @@ class Device:
     def reset(self) -> None:
         self._core._lib.sim_device_reset(self._ptr)
 
-    def sample(self, ref: Reference | None, provider: Provider) -> DeviceResult:
+    def sample(self, ref: Gallery | None, provider: Provider) -> DeviceResult:
+        """One firmware sampling cycle; may admit an AUTO reference into `ref`."""
         errors: list[BaseException] = []
 
         def callback(attempt, gray_out, boxes_out, n_out, idx_out, _user):

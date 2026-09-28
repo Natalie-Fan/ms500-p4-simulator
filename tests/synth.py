@@ -14,16 +14,40 @@ FLOOD_Y0, FLOOD_Y1 = 195, 500
 CAR = Box(0.0, 0.0, 1919.0, 1079.0, 0.9, 2)
 
 
-@lru_cache(maxsize=1)
-def _dry() -> np.ndarray:
-    y, x = np.mgrid[0:FRAME_H, 0:FRAME_W].astype(np.uint32)
+def _texture(x: np.ndarray, y: np.ndarray) -> np.ndarray:
     h = (x * np.uint32(73856093)) ^ (y * np.uint32(19349663))
     h ^= h >> np.uint32(13)
     h *= np.uint32(0x5BD1E995)
     h ^= h >> np.uint32(15)
-    g = ((h >> np.uint32(8)) & np.uint32(0xFF)).astype(np.uint8)
+    return ((h >> np.uint32(8)) & np.uint32(0xFF)).astype(np.uint8)
+
+
+@lru_cache(maxsize=1)
+def _dry() -> np.ndarray:
+    y, x = np.mgrid[0:FRAME_H, 0:FRAME_W].astype(np.uint32)
+    g = _texture(x, y)
     g.flags.writeable = False
     return g
+
+
+def relit_gray(dry_weight: int, other_weight: int, seed: int) -> np.ndarray:
+    """Dry, kerb rows blended with an unrelated texture (a lighting change); correlation
+    against dry_gray() is about dry_weight / sqrt(dry_weight^2 + other_weight^2)."""
+    g = _dry().copy()
+    y, x = np.mgrid[FLOOD_Y0:FLOOD_Y1, 0:FRAME_W].astype(np.uint32)
+    other = _texture(x + np.uint32(seed), y + np.uint32(2 * seed)).astype(np.uint32)
+    rows = g[FLOOD_Y0:FLOOD_Y1].astype(np.uint32)
+    g[FLOOD_Y0:FLOOD_Y1] = ((dry_weight * rows + other_weight * other) //
+                            (dry_weight + other_weight)).astype(np.uint8)
+    return g
+
+
+def dusk_gray() -> np.ndarray:
+    return relit_gray(4, 3, 7777)   # ~0.80: learnable
+
+
+def night_gray() -> np.ndarray:
+    return relit_gray(2, 3, 4242)   # ~0.55: ambiguous
 
 
 def dry_gray() -> np.ndarray:

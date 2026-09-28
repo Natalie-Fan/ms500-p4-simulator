@@ -81,6 +81,7 @@ class RefStatus:
     description: str
     geometry_version: int
     built_under: int | None
+    manual_names: tuple[str, ...] = ()   # manual references in order, for View ▸ Show reference
 
 
 class Session:
@@ -93,9 +94,11 @@ class Session:
         self.geometry = self.default_geometry()
         self.geometry_version = 0
         self.core.set_geometry(self.geometry)
+        # The live gallery (manual baselines + whatever manual Sample has learned),
+        # and the manual baselines' frames, from which every batch run and reset
+        # rebuilds a manual-only gallery.
         self.reference = None
-        self.ref_gray: np.ndarray | None = None
-        self.ref_info: dict = {"kind": "none"}
+        self.manual_refs: list[tuple[np.ndarray, dict]] = []
         self.ref_version: int | None = None
         self.device = core.new_device()
         self.dense_cache: dict[int, ScoreResult] = {}
@@ -132,8 +135,10 @@ class Session:
         if inner is None:
             meta = cache_meta(src.fingerprint(), self.model, DEFAULT_CONF)
             inner = BoxProvider(self.core, BoxStore(src.path, meta), None)
-        if self.ref_info["kind"] == "frame" and self.source is not None:
-            self.ref_info.setdefault("input", str(self.source.path))
+        if self.source is not None:
+            for _, info in self.manual_refs:
+                if info["kind"] == "frame":
+                    info.setdefault("input", str(self.source.path))
         self.source = src
         self.boxes = LenientBoxes(inner)
         self.labels = None
@@ -164,8 +169,9 @@ class Session:
         boxes = [(b, edited, self.core.band_coverage(b.to_box())) for b in cached]
         score = self._score(idx, rgb, cached) if rgb is not None else None
         shown = rgb
-        if diff and rgb is not None and self.ref_gray is not None:
-            d = cv2.absdiff(self.core.rgb_to_gray(rgb), self.ref_gray)
+        if diff and rgb is not None and self.manual_refs:
+            # Against the newest manual baseline: learned references keep no image.
+            d = cv2.absdiff(self.core.rgb_to_gray(rgb), self.manual_refs[-1][0])
             d = np.minimum(d.astype(np.uint16) * 3, 255).astype(np.uint8)
             shown = np.repeat(d[:, :, None], 3, axis=2)
         return FrameData(idx, t, shown, boxes, score, self._label(t, idx))
@@ -179,12 +185,21 @@ class Session:
         return fd.score
 
     # ----------------------------------------------------------- reference
+    def _manual_gallery(self):
+        """A gallery of just the manual baselines, built under the current geometry."""
+        gallery = self.core.new_gallery()
+        for gray, _ in self.manual_refs:
+            gallery.add_manual(gray)
+        return gallery
+
     def _build_reference(self, rgb: np.ndarray, info: dict) -> RefStatus:
+        # As Capture Baseline on the device: added to the live gallery, learned
+        # references kept.
         gray = self.core.rgb_to_gray(rgb)
-        ref = self.core.new_reference()
-        if not ref.build(gray):
-            raise FloodSimError("geometry leaves no usable sampling window")
-        self.reference, self.ref_gray, self.ref_info = ref, gray, info
+        if self.reference is None:
+            self.reference = self.core.new_gallery()
+        self.reference.add_manual(gray)
+        self.manual_refs.append((gray, info))
         self.ref_version = self.geometry_version
         self.dense_cache.clear()
         return self.ref_status()
@@ -204,28 +219,52 @@ class Session:
         return self._build_reference(rgb, {"kind": "image", "path": str(path)})
 
     def rebuild_reference(self) -> RefStatus:
-        if self.ref_gray is None:
+        """Rebuild the manual baselines under the current geometry; learned ones are
+        dropped (neither the device nor the simulator keeps their frames)."""
+        if not self.manual_refs:
             raise FloodSimError("no reference to rebuild; set one first")
-        ref = self.core.new_reference()
-        if not ref.build(self.ref_gray):
-            raise FloodSimError("geometry leaves no usable sampling window")
-        self.reference = ref
+        self.reference = self._manual_gallery()
         self.ref_version = self.geometry_version
         self.dense_cache.clear()
         return self.ref_status()
 
-    def ref_status(self) -> RefStatus:
-        if self.reference is None:
-            return RefStatus(False, False, "none", self.geometry_version, None)
-        info = self.ref_info
+    def clear_references(self) -> RefStatus:
+        self.reference = None
+        self.manual_refs.clear()
+        self.ref_version = None
+        self.dense_cache.clear()
+        return self.ref_status()
+
+    @staticmethod
+    def _describe(info: dict) -> str:
         if info["kind"] == "frame":
             desc = f"frame {info['frame_idx']} ({info['t_sec']:.2f} s)"
             if "input" in info:
                 desc += f" of {Path(info['input']).name}"
-        else:
-            desc = f"image {Path(info['path']).name}"
-        return RefStatus(True, self.ref_version != self.geometry_version, desc,
-                         self.geometry_version, self.ref_version)
+            return desc
+        return f"image {Path(info['path']).name}"
+
+    def ref_status(self) -> RefStatus:
+        if self.reference is None or not self.reference.ready:
+            return RefStatus(False, False, "none", self.geometry_version, None)
+        slots = self.reference.slots()
+        learned = sum(source == "auto" for _, source, _ in slots)
+        lines = [f"{len(slots)} reference(s): {len(slots) - learned} manual, {learned} learned"]
+        names = tuple(self._describe(info) for _, info in self.manual_refs)
+        lines += [f"  manual: {name}" for name in names]
+        return RefStatus(True, self.ref_version != self.geometry_version, "\n".join(lines),
+                         self.geometry_version, self.ref_version, names)
+
+    def reference_view(self, index: int) -> np.ndarray:
+        """Manual reference `index` as RGB, in the gray the firmware stores and compares."""
+        if not 0 <= index < len(self.manual_refs):
+            raise FloodSimError(f"no manual reference {index + 1}")
+        return np.repeat(self.manual_refs[index][0][:, :, None], 3, axis=2)
+
+    def _reference_info(self) -> dict:
+        if not self.manual_refs:
+            return {"kind": "none"}
+        return {"kind": "gallery", "manual": [dict(info) for _, info in self.manual_refs]}
 
     # ------------------------------------------------------------ geometry
     def default_geometry(self) -> Geometry:
@@ -263,13 +302,20 @@ class Session:
         src = self._src()
         t = src.timestamp(idx)
         r = sample_device_at(self.device, self.reference, FrameFeeder(self.core, src, self.boxes), t, retry_gap)
+        if r.admitted:     # the live gallery changed: cached scores no longer hold
+            self.dense_cache.clear()
         row = device_row(len(self.manual_rows), t, r)
         self._label_rows([row])
         self.manual_rows.append(row)
         return dict(row)
 
-    def reset_device(self) -> None:
+    def reset_device(self) -> RefStatus:
+        """Clear the capture state and forget learned references (manual ones are
+        rebuilt under the current geometry)."""
         self.device.reset()
+        if self.manual_refs:
+            self.rebuild_reference()
+        return self.ref_status()
 
     # ---------------------------------------------------------------- runs
     def run_batch(self, params: RunParams, progress=None, cancel=None) -> dict:
@@ -281,15 +327,20 @@ class Session:
         if rebuilt:
             self.rebuild_reference()
         self.boxes.missing_frames.clear()
+        # Every run starts from the manual baselines only, so runs are reproducible
+        # and what a device run learns never leaks into the session.
+        gallery = self._manual_gallery() if self.manual_refs else None
         if params.mode == "dense":
-            out = run_dense(self.core, src, self.boxes, self.reference, params, progress=progress, cancel=cancel)
-            for r in out.rows:
-                self.dense_cache[r["frame_idx"]] = ScoreResult(**{k: r[k] for k in _SCORE_FIELDS})
+            out = run_dense(self.core, src, self.boxes, gallery, params, progress=progress, cancel=cancel)
+            # Frame scores use the live gallery; only share them when it holds the same references.
+            if all(source == "manual" for _, source, _ in self.reference.slots()):
+                for r in out.rows:
+                    self.dense_cache[r["frame_idx"]] = ScoreResult(**{k: r[k] for k in _SCORE_FIELDS})
         else:
-            out = run_device(self.core, src, self.boxes, self.reference, params, progress=progress, cancel=cancel)
+            out = run_device(self.core, src, self.boxes, gallery, params, progress=progress, cancel=cancel)
         self._label_rows(out.rows)
         missing = len(self.boxes.missing_frames)
-        reference = dict(self.ref_info)
+        reference = self._reference_info()
         if self.reference is not None:
             reference["rebuilt_for_run"] = rebuilt
         self.run = RunRecord(params, out, self.geometry, reference,

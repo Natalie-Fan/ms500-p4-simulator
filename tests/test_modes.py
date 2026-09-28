@@ -23,8 +23,8 @@ def _golden_source():
 
 @pytest.fixture
 def ref(core):
-    r = core.new_reference()
-    assert r.build(dry_gray())
+    r = core.new_gallery()
+    r.add_manual(dry_gray())
     return r
 
 

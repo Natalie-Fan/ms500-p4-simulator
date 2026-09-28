@@ -1,14 +1,14 @@
 /* Values mirrored from firmware device glue that the simulator cannot compile
  * (it needs FreeRTOS, the camera, SPIFFS). Each names the firmware file and
- * line it was copied from, at firmware commit 7c9bed2. When one of those
+ * line it was copied from, at firmware commit 2a8a493. When one of those
  * files changes, re-check the matching value here -- nothing else notices.
  *
  * Mirrored on the Python side, listed here so this stays the one index:
- *   floodsim/boxes.py  COCO_TO_FLOOD  <- main/ai_process/flood_task.c:101-112 map_traffic_class
+ *   floodsim/boxes.py  COCO_TO_FLOOD  <- main/ai_process/flood_task.c:103-112 map_traffic_class
  *   floodsim/modes.py  UploadWriter label "%06X", sequence per upload
- *                                       <- main/ai_process/flood_task.c:221
- *   sim_shim.c sim_device_sample() reference-ready gate
- *                                       <- main/ai_process/flood_task.c:271
+ *                                       <- main/ai_process/flood_task.c:228
+ *   sim_shim.c sim_device_sample() empty-gallery gate + flood_gallery_after_sample()
+ *                                       <- main/ai_process/flood_task.c:300-312
  *   sim_shim.c sim_validate_geometry()  <- main/ai_process/flood_geometry_config.c:118-160
  */
 #ifndef DEVICE_CONSTANTS_H

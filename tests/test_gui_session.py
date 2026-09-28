@@ -1,6 +1,7 @@
 import json
 from pathlib import Path
 
+import numpy as np
 import pytest
 
 from floodsim.boxes import DEFAULT_CONF, DEFAULT_MODEL, BoxStore, CachedBox, cache_meta
@@ -11,7 +12,7 @@ from floodsim.gui.session import Session
 from floodsim.modes import RunParams
 from floodsim.report import compare_runs, read_samples
 from floodsim.source import open_source, write_image
-from tests.synth import dry_gray, flooded_gray, to_rgb, write_frame_folder
+from tests.synth import dry_gray, dusk_gray, flooded_gray, to_rgb, write_frame_folder
 
 CAR = CachedBox(0.0, 0.0, 1919.0, 1079.0, 1.0, "car", 2)
 
@@ -40,7 +41,8 @@ def test_frame_without_reference_has_no_score(session):
 
 def test_reference_then_scores(session):
     st = session.set_reference_frame(0)
-    assert st.ready and not st.stale and st.description == "frame 0 (0.00 s)"
+    assert st.ready and not st.stale
+    assert st.description == "1 reference(s): 1 manual, 0 learned\n  manual: frame 0 (0.00 s)"
     assert session.frame(0).score.curb_correlation == pytest.approx(1.0, abs=1e-6)
     assert session.frame(2).score.submerged is True
     assert session.score_frame(2).severity == "moderate"
@@ -185,11 +187,11 @@ def test_open_clears_labels_and_marks_frame_reference_as_previous_input(core, bu
     session.open(other, no_detector=True)
     assert session.labels is None and session.labels_path is None
     assert session.frame(0).label is None
-    assert session.ref_status().description == "frame 0 (0.00 s) of clip"
+    assert session.ref_status().description.endswith("manual: frame 0 (0.00 s) of clip")
     session.run_batch(RunParams(mode="dense"))
     out = Path(session.export_run(tmp_path / "run"))
     info = json.loads((out / "run.json").read_text())
-    assert info["reference"]["input"] == str(folder) and info["labels"] is None
+    assert info["reference"]["manual"][0]["input"] == str(folder) and info["labels"] is None
 
 
 def test_boxes_description_without_detector_or_cache(session, tmp_path):
@@ -243,6 +245,38 @@ def test_gui_and_cli_runs_match(core, build_info, folder, tmp_path, mode):
     assert cli_main(["run", str(folder), "--mode", mode, "--reference", str(ref),
                      "--no-detector", "--out", str(cli_out)]) == 0
     assert read_samples(gui_out) and compare_runs(gui_out, cli_out) == []
+
+
+def test_manual_sample_learns_and_reset_forgets(core, build_info, tmp_path):
+    clip = write_frame_folder(tmp_path / "lit", [(0, dry_gray()), (60000, dusk_gray())])
+    s = Session(core, build_info)
+    s.open(clip, no_detector=True)
+    s.set_reference_frame(0)
+    row = s.sample(1)
+    assert row["admitted"] and row["gallery_count"] == 2
+    assert "2 reference(s): 1 manual, 1 learned" in s.ref_status().description
+    assert s.frame(1).score.gallery_slot == 1      # frame scores see the learned reference
+    # A batch run starts from the manual baselines only, and leaves the session gallery alone.
+    res = s.run_batch(RunParams(mode="device", period=60.0))
+    assert [r["admitted"] for r in res["rows"]] == [False, True]
+    assert s.reference.count == 2
+    s.reset_device()
+    assert "1 reference(s): 1 manual, 0 learned" in s.ref_status().description
+    s.set_reference_frame(1)
+    assert "2 reference(s): 2 manual, 0 learned" in s.ref_status().description
+    s.clear_references()
+    assert not s.ref_status().ready
+
+
+def test_reference_view_returns_stored_gray_as_rgb(session):
+    session.set_reference_frame(0)
+    session.set_reference_frame(2)
+    assert session.ref_status().manual_names == ("frame 0 (0.00 s)", "frame 2 (60.00 s)")
+    view = session.reference_view(1)
+    assert view.shape == (1080, 1920, 3)
+    assert np.array_equal(view[:, :, 0], flooded_gray()) and np.array_equal(view[:, :, 2], flooded_gray())
+    with pytest.raises(FloodSimError, match="no manual reference 3"):
+        session.reference_view(2)
 
 
 def test_session_uses_its_model_for_the_box_cache(core, build_info, folder):

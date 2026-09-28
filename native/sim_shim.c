@@ -2,6 +2,7 @@
 
 #include "flood_capture.h"
 #include "flood_curbcheck.h"
+#include "flood_gallery.h"
 #include "flood_geometry.h"
 #include "flood_veto.h"
 #include "device_constants.h"
@@ -180,25 +181,63 @@ static flood_gray_t full_frame(const uint8_t *gray)
     return f;
 }
 
-void *sim_ref_new(void)      { return calloc(1, sizeof(flood_reference_t)); }
-void  sim_ref_free(void *ref) { free(ref); }
-
-int32_t sim_ref_build(void *ref, const uint8_t *gray)
+/* flood_gallery_t is ~151KB: always heap-allocated (flood_gallery.h). */
+void *sim_gallery_new(void)
 {
-    if (!ref || !gray) return 0;
+    flood_gallery_t *g = malloc(sizeof(*g));
+    if (g) flood_gallery_init(g);
+    return g;
+}
+
+void sim_gallery_free(void *gallery) { free(gallery); }
+
+void sim_gallery_clear(void *gallery)
+{
+    if (gallery) flood_gallery_init((flood_gallery_t *)gallery);
+}
+
+int32_t sim_gallery_max_slots(void) { return FLOOD_GALLERY_MAX_SLOTS; }
+
+int32_t sim_gallery_count(const void *gallery)
+{
+    return gallery ? flood_gallery_count((const flood_gallery_t *)gallery) : 0;
+}
+
+/* Same two steps as flood_task.c's flood_do_calibration(): build the reference,
+ * then flood_gallery_add_manual(). */
+int32_t sim_gallery_add_manual(void *gallery, const uint8_t *gray)
+{
+    if (!gallery || !gray) return 0;
+    static flood_reference_t ref;   /* ~19KB; the shim is single-threaded */
     const flood_gray_t dry = full_frame(gray);
-    return flood_reference_init((flood_reference_t *)ref, &dry) ? 1 : 0;
+    if (!flood_reference_init(&ref, &dry)) return 0;
+    return flood_gallery_add_manual((flood_gallery_t *)gallery, &ref) ? 1 : -1;
 }
 
-int32_t sim_ref_ready(const void *ref)
+static const flood_gallery_slot_t *slot_at(const void *gallery, int32_t index)
 {
-    return (ref && ((const flood_reference_t *)ref)->ready) ? 1 : 0;
+    if (!gallery || index < 0 || index >= FLOOD_GALLERY_MAX_SLOTS) return NULL;
+    const flood_gallery_slot_t *s = &((const flood_gallery_t *)gallery)->slots[index];
+    return s->in_use ? s : NULL;
 }
 
-float sim_correlation_at(const void *ref, const uint8_t *gray, int32_t dx, int32_t dy)
+int32_t sim_gallery_slot(const void *gallery, int32_t index, int32_t *source,
+                         uint32_t *last_matched_cycle)
 {
+    const flood_gallery_slot_t *s = slot_at(gallery, index);
+    if (!s) return 0;
+    if (source) *source = (int32_t)s->source;
+    if (last_matched_cycle) *last_matched_cycle = s->last_matched_cycle;
+    return 1;
+}
+
+float sim_correlation_at(const void *gallery, int32_t slot, const uint8_t *gray,
+                         int32_t dx, int32_t dy)
+{
+    const flood_gallery_slot_t *s = slot_at(gallery, slot);
+    if (!s || !gray) return 0.0f;
     const flood_gray_t f = full_frame(gray);
-    return flood_curb_correlation_at((const flood_reference_t *)ref, &f, dx, dy);
+    return flood_curb_correlation_at(&s->ref, &f, dx, dy);
 }
 
 /* ------------------------------------------------------------------- boxes */
@@ -239,12 +278,13 @@ float sim_band_coverage(const sim_box_t *box)
 int32_t sim_heartbeat_every(void) { return FLOOD_HEARTBEAT_EVERY; }
 
 /* Dense scoring: the two firmware stages on one frame, no capture state. */
-int32_t sim_score(const void *ref, const uint8_t *gray, const sim_box_t *boxes,
+int32_t sim_score(const void *gallery, const uint8_t *gray, const sim_box_t *boxes,
                   int32_t n_boxes, sim_score_t *out)
 {
     if (!out) return 0;
     memset(out, 0, sizeof(*out));
-    if (!sim_ref_ready(ref) || !gray) return 0;
+    out->gallery_slot = -1;
+    if (sim_gallery_count(gallery) == 0 || !gray) return 0;
 
     flood_box_t fb[SIM_MAX_BOXES];
     const int32_t n = boxes ? clamp_box_count(n_boxes) : 0;
@@ -252,7 +292,8 @@ int32_t sim_score(const void *ref, const uint8_t *gray, const sim_box_t *boxes,
     const flood_veto_t v = flood_veto_check(fb, n);
 
     const flood_gray_t f = full_frame(gray);
-    const flood_curb_state_t cs = flood_curbcheck((const flood_reference_t *)ref, &f, true);
+    int slot = -1;
+    const flood_curb_state_t cs = flood_gallery_best((const flood_gallery_t *)gallery, &f, true, &slot);
 
     out->veto_usable      = v.usable ? 1 : 0;
     out->veto_coverage    = v.coverage;
@@ -262,6 +303,7 @@ int32_t sim_score(const void *ref, const uint8_t *gray, const sim_box_t *boxes,
     out->severity         = (int32_t)cs.severity;
     out->shift_dx         = cs.shift_dx;
     out->shift_dy         = cs.shift_dy;
+    out->gallery_slot     = slot;
     return 1;
 }
 
@@ -331,19 +373,23 @@ static int device_detect(const flood_gray_t *frame, flood_box_t *boxes, int max_
     return n;
 }
 
-void sim_device_sample(void *dev, const void *ref, sim_provider_fn provider, void *user,
+void sim_device_sample(void *dev, void *gallery, sim_provider_fn provider, void *user,
                        sim_result_t *out)
 {
     sim_device_t *d = dev;
+    flood_gallery_t *g = gallery;
     memset(out, 0, sizeof(*out));
     out->frame_idx = -1;
+    out->gallery_slot = -1;
+    out->gallery_source = -1;
+    out->gallery_count = sim_gallery_count(g);
     if (!d || !provider) {
         out->outcome = SIM_OUT_SKIPPED_NO_REF;
         return;
     }
-    /* flood_task.c:271 -- an unready reference is never sampled: the firmware
+    /* flood_task.c:300 -- an empty gallery is never sampled: the firmware
      * would otherwise read correlation 0 as a flood on every sample. */
-    if (!sim_ref_ready(ref)) {
+    if (out->gallery_count == 0) {
         out->outcome = SIM_OUT_SKIPPED_NO_REF;
         out->since_image = d->capture.since_image;
         return;
@@ -357,8 +403,9 @@ void sim_device_sample(void *dev, const void *ref, sim_provider_fn provider, voi
     d->provider = provider;
     d->user = user;
 
-    const flood_reference_t *r = ref;
-    const flood_decision_t dec = flood_capture_sample(&d->capture, r, device_grab, device_detect, d);
+    flood_gray_t sampled;
+    const flood_decision_t dec = flood_capture_sample(&d->capture, g, device_grab, device_detect, d,
+                                                      &sampled);
 
     out->outcome          = (int32_t)dec.outcome;
     out->frames_taken     = dec.frames_taken;
@@ -370,11 +417,22 @@ void sim_device_sample(void *dev, const void *ref, sim_provider_fn provider, voi
     out->veto_worst_class = (int32_t)d->last_veto.worst_class;
     out->since_image      = d->capture.since_image;
     out->frame_idx        = d->last_frame_idx;
-    if (dec.has_reading) {
-        /* A reading always comes from the last grab, still in d->gray. The
-         * decision does not carry the registration shift, so recompute it
-         * with the same firmware function flood_curbcheck() used. */
-        const flood_gray_t f = full_frame(d->gray);
-        flood_estimate_shift(r, &f, &out->shift_dx, &out->shift_dy);
+    if (dec.has_reading && dec.gallery_index >= 0) {
+        const flood_gallery_slot_t *slot = &g->slots[dec.gallery_index];
+        out->gallery_slot   = dec.gallery_index;
+        out->gallery_source = (int32_t)slot->source;
+        /* The decision does not carry the registration shift, so recompute it
+         * with the same firmware function flood_curbcheck() used. Before
+         * after_sample: admission may evict and overwrite this very slot. */
+        flood_estimate_shift(&slot->ref, &sampled, &out->shift_dx, &out->shift_dy);
+
+        /* flood_task.c:306-312 -- the gallery bookkeeping after every reading. */
+        bool admitted = false, notice = false;
+        float notice_corr = 0.0f;
+        flood_gallery_after_sample(g, &sampled, dec.curb_correlation, dec.gallery_index,
+                                   &admitted, &notice, &notice_corr);
+        out->admitted = admitted ? 1 : 0;
+        out->notice   = notice ? 1 : 0;
     }
+    out->gallery_count = sim_gallery_count(g);
 }

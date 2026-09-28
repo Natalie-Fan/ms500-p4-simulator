@@ -30,7 +30,7 @@ def _open(qtbot, win, path, **kw):
 
 def _set_reference(qtbot, win):
     win.tools.set_reference_btn.click()
-    qtbot.waitUntil(lambda: win.verdict.reference_label.text().startswith("frame"), timeout=T)
+    qtbot.waitUntil(lambda: "manual: frame" in win.verdict.reference_label.text(), timeout=T)
 
 
 def test_smoke_open_reference_score_edit_stale(qtbot, tmp_path, window):
@@ -61,6 +61,32 @@ def test_manual_sample_adds_row_and_marker(qtbot, tmp_path, window):
     assert len(window.timeline.markers.data) == 1
     window.tools.reset_btn.click()
     qtbot.waitUntil(lambda: window.verdict.since_label.text() == "0 / 60", timeout=T)
+
+
+def test_show_reference_then_navigating_returns_to_frames(qtbot, tmp_path, window, monkeypatch):
+    folder = write_frame_folder(tmp_path / "clip", [(0, dry_gray()), (60000, flooded_gray())])
+    _open(qtbot, window, folder)
+    window.show_frame(1)
+    qtbot.waitUntil(lambda: window._current == 1, timeout=T)
+    assert not window.show_ref_menu.isEnabled()
+    window.show_frame(0)
+    qtbot.waitUntil(lambda: window._current == 0, timeout=T)
+    _set_reference(qtbot, window)                   # reference 1 = the dry frame 0
+    window.show_frame(1)
+    qtbot.waitUntil(lambda: window._current == 1 and not window._loading, timeout=T)
+
+    shown = []
+    real_set_image = window.frame_view.set_image
+    monkeypatch.setattr(window.frame_view, "set_image", lambda rgb: (shown.append(rgb), real_set_image(rgb)))
+    actions = window.show_ref_menu.actions()
+    assert [a.text() for a in actions] == ["Off", "1: frame 0 (0.00 s)"]
+    actions[1].trigger()
+    qtbot.waitUntil(lambda: bool(shown) and np.array_equal(shown[-1][:, :, 0], dry_gray()), timeout=T)
+    assert "Showing reference 1:" in window.statusBar().currentMessage()
+
+    window._navigate(1)                             # scrubber / arrow keys / table rows go through here
+    qtbot.waitUntil(lambda: np.array_equal(shown[-1][:, :, 0], flooded_gray()), timeout=T)
+    assert window._show_ref is None and actions[0].isChecked()
 
 
 def test_box_draw_and_delete(qtbot, tmp_path, window, monkeypatch):

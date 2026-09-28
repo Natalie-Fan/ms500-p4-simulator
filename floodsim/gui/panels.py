@@ -42,13 +42,14 @@ class ToolsPanel(QWidget):
         layout.addWidget(line)
         self.sample_btn = QPushButton("Sample")
         self.sample_btn.setToolTip("Full device sample here: retry on a later frame if obstructed; "
-                                   "advances the heartbeat counter")
+                                   "advances the heartbeat counter; may learn a reference")
         self.score_btn = QPushButton("Score")
         self.score_btn.setToolTip("Veto + curb check on this frame only; device state untouched")
-        self.set_reference_btn = QPushButton("Set reference")
-        self.set_reference_btn.setToolTip("Use this frame as the dry reference")
+        self.set_reference_btn = QPushButton("Add reference")
+        self.set_reference_btn.setToolTip("Add this frame as a manual dry baseline "
+                                          "(the device's Capture Baseline)")
         self.reset_btn = QPushButton("Reset state")
-        self.reset_btn.setToolTip("Clear the heartbeat counter")
+        self.reset_btn.setToolTip("Clear the heartbeat counter and forget learned references")
         for button, signal in ((self.sample_btn, self.sampleClicked), (self.score_btn, self.scoreClicked),
                                (self.set_reference_btn, self.setReferenceClicked),
                                (self.reset_btn, self.resetStateClicked)):
@@ -90,11 +91,14 @@ class VerdictPanel(QWidget):
         self.shift_label = QLabel(DASH)
         self.veto_label = QLabel(DASH)
         self.frames_label = QLabel(DASH)
+        self.matched_label = QLabel(DASH)
+        self.matched_label.setWordWrap(True)
         self.label_label = QLabel(DASH)
         for name, widget in (("", self.source_label), ("Outcome", self.outcome_label),
                              ("Severity", self.severity_label), ("Correlation", self.corr_label),
                              ("Shift", self.shift_label), ("Veto", self.veto_label),
-                             ("Frames taken", self.frames_label), ("Label", self.label_label)):
+                             ("Frames taken", self.frames_label), ("Matched", self.matched_label),
+                             ("Label", self.label_label)):
             form.addRow(name, widget)
         layout.addLayout(form)
 
@@ -104,7 +108,7 @@ class VerdictPanel(QWidget):
         self.reference_label = QLabel("none")
         self.firmware_label = QLabel(DASH)
         state.addRow("Since image", self.since_label)
-        state.addRow("Reference", self.reference_label)
+        state.addRow("Gallery", self.reference_label)
         state.addRow("Firmware", self.firmware_label)
         layout.addLayout(state)
 
@@ -133,7 +137,8 @@ class VerdictPanel(QWidget):
         self.frames_label.setText(DASH)
         if score is None:
             self._outcome("no score", None)
-            for w in (self.severity_label, self.corr_label, self.shift_label, self.veto_label):
+            for w in (self.severity_label, self.corr_label, self.shift_label, self.veto_label,
+                      self.matched_label):
                 w.setText(DASH)
             return
         key = "vetoed" if not score.veto_usable else ("submerged" if score.submerged else "clear")
@@ -142,6 +147,7 @@ class VerdictPanel(QWidget):
         self.corr_label.setText(_corr(score.curb_correlation, threshold))
         self.shift_label.setText(f"dx {score.shift_dx:+d}  dy {score.shift_dy:+d}")
         self.veto_label.setText(_veto(score.veto_usable, score.veto_coverage, score.veto_worst_class))
+        self.matched_label.setText(f"slot {score.gallery_slot}" if score.gallery_slot >= 0 else DASH)
 
     def show_device(self, row: dict, threshold: float | None) -> None:
         self.source_label.setText(f"device sample #{row['sample']} at {row['t_sec']:.2f} s")
@@ -152,6 +158,13 @@ class VerdictPanel(QWidget):
         self.shift_label.setText(f"dx {row['shift_dx']:+d}  dy {row['shift_dy']:+d}")
         self.veto_label.setText(_veto(row["veto_usable"], row["veto_coverage"], row["veto_worst_class"]))
         self.frames_label.setText(str(row["frames_taken"]))
+        matched = (f"slot {row['gallery_slot']} ({row['gallery_source']})"
+                   if row["gallery_slot"] >= 0 else DASH)
+        if row["admitted"]:
+            matched += f"; learned a new reference ({row['gallery_count']} now)"
+        if row["notice"]:
+            matched += "; no confident match for a while: add a baseline for this lighting"
+        self.matched_label.setText(matched)
         self.label_label.setText(row.get("label") or DASH)
 
     def show_state(self, since_image: int, heartbeat_every: int | None) -> None:
@@ -175,10 +188,11 @@ class VerdictPanel(QWidget):
 
 DEVICE_COLUMNS = [("#", "sample"), ("t (s)", "t_sec"), ("frame", "frame_idx"), ("outcome", "outcome"),
                   ("corr", "curb_correlation"), ("severity", "severity"), ("veto cov", "veto_coverage"),
-                  ("label", "label")]
+                  ("slot", "gallery_slot"), ("learned", "admitted"), ("notice", "notice"),
+                  ("refs", "gallery_count"), ("label", "label")]
 DENSE_COLUMNS = [("frame", "frame_idx"), ("t (s)", "t_sec"), ("submerged", "submerged"),
                  ("corr", "curb_correlation"), ("severity", "severity"), ("veto", "veto_usable"),
-                 ("veto cov", "veto_coverage"), ("label", "label")]
+                 ("veto cov", "veto_coverage"), ("slot", "gallery_slot"), ("label", "label")]
 
 
 class SamplesTable(QTableWidget):

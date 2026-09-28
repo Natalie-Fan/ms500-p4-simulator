@@ -270,7 +270,7 @@ def fig_gui(dataset: Path | None):
     win.open_path(dataset / "frames", fps=1.0)
     wait(lambda: win._last_frame is not None)
     worker.submit(lambda: session.set_reference_image(dataset / "dry_reference_full.jpg"), win._after_reference)
-    wait(lambda: win.verdict.reference_label.text().startswith("image"))
+    wait(lambda: "manual: image" in win.verdict.reference_label.text())
     worker.submit(lambda: session.run_batch(RunParams(mode="dense")), win._on_run_done)
     wait(lambda: win.samples.rowCount() > 0)
     win.show_frame(0)
