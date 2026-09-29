@@ -256,16 +256,39 @@ def test_manual_sample_learns_and_reset_forgets(core, build_info, tmp_path):
     assert row["admitted"] and row["gallery_count"] == 2
     assert "2 reference(s): 1 manual, 1 learned" in s.ref_status().description
     assert s.frame(1).score.gallery_slot == 1      # frame scores see the learned reference
-    # A batch run starts from the manual baselines only, and leaves the session gallery alone.
+    # A device run starts from the manual baselines only (it learns dusk again at 60 s,
+    # although the session already had it), then the session adopts its final gallery.
     res = s.run_batch(RunParams(mode="device", period=60.0))
     assert [r["admitted"] for r in res["rows"]] == [False, True]
-    assert s.reference.count == 2
+    assert res["gallery_adopted"] and s.reference.count == 2
     s.reset_device()
     assert "1 reference(s): 1 manual, 0 learned" in s.ref_status().description
     s.set_reference_frame(1)
     assert "2 reference(s): 2 manual, 0 learned" in s.ref_status().description
     s.clear_references()
     assert not s.ref_status().ready
+
+
+def test_device_run_learning_carries_into_scores_and_dense_runs(core, build_info, tmp_path):
+    clip = write_frame_folder(tmp_path / "day", [(0, dry_gray()), (60000, dusk_gray())])
+    s = Session(core, build_info)
+    s.open(clip, no_detector=True)
+    s.set_reference_frame(0)
+    before = s.run_batch(RunParams(mode="dense"))["rows"]
+    assert before[1]["gallery_slot"] == 0 and before[1]["curb_correlation"] < 0.95
+
+    s.run_batch(RunParams(mode="device", period=60.0))
+    assert "2 reference(s): 1 manual, 1 learned" in s.ref_status().description
+    assert s.frame(1).score.gallery_slot == 1                 # frame scores use the learned slot
+    after = s.run_batch(RunParams(mode="dense"))["rows"]
+    assert after[1]["gallery_slot"] == 1 and after[1]["curb_correlation"] == pytest.approx(1.0, abs=1e-6)
+    assert s.run.reference["learned"] == 1                    # run.json says what the dense run saw
+
+    # A second device run still starts from the manual baselines: same rows as the first.
+    again = s.run_batch(RunParams(mode="device", period=60.0))["rows"]
+    assert [r["admitted"] for r in again] == [False, True]
+    s.reset_device()
+    assert "1 manual, 0 learned" in s.ref_status().description
 
 
 def test_reference_view_returns_stored_gray_as_rgb(session):

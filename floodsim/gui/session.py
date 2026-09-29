@@ -327,27 +327,35 @@ class Session:
         if rebuilt:
             self.rebuild_reference()
         self.boxes.missing_frames.clear()
-        # Every run starts from the manual baselines only, so runs are reproducible
-        # and what a device run learns never leaks into the session.
-        gallery = self._manual_gallery() if self.manual_refs else None
+        reference = self._reference_info()
+        adopted = False
         if params.mode == "dense":
-            out = run_dense(self.core, src, self.boxes, gallery, params, progress=progress, cancel=cancel)
-            # Frame scores use the live gallery; only share them when it holds the same references.
-            if all(source == "manual" for _, source, _ in self.reference.slots()):
-                for r in out.rows:
-                    self.dense_cache[r["frame_idx"]] = ScoreResult(**{k: r[k] for k in _SCORE_FIELDS})
+            # Read-only against the session's gallery, learned references included, so
+            # the curve shows what the device would score with what it has learned.
+            reference["learned"] = self.reference.count - len(self.manual_refs)
+            out = run_dense(self.core, src, self.boxes, self.reference, params, progress=progress, cancel=cancel)
+            for r in out.rows:
+                self.dense_cache[r["frame_idx"]] = ScoreResult(**{k: r[k] for k in _SCORE_FIELDS})
         else:
+            # A device run starts from the manual baselines only, so it is reproducible;
+            # afterwards the session adopts the gallery it ended with, as the device would
+            # keep what it learned.
+            gallery = self._manual_gallery() if self.manual_refs else None
             out = run_device(self.core, src, self.boxes, gallery, params, progress=progress, cancel=cancel)
+            if gallery is not None:
+                self.reference = gallery
+                self.dense_cache.clear()
+                adopted = True
         self._label_rows(out.rows)
         missing = len(self.boxes.missing_frames)
-        reference = self._reference_info()
         if self.reference is not None:
             reference["rebuilt_for_run"] = rebuilt
         self.run = RunRecord(params, out, self.geometry, reference,
                              {**self.boxes.description, "frames_without_boxes": missing})
         return {"mode": params.mode, "rows": [dict(r) for r in out.rows],
                 "cancelled": out.cancelled, "decode_failures": out.decode_failures,
-                "reference_rebuilt": rebuilt, "frames_without_boxes": missing}
+                "reference_rebuilt": rebuilt, "frames_without_boxes": missing,
+                "gallery_adopted": adopted}
 
     def label_spans(self) -> list[tuple[float, float, str]]:
         src = self.source

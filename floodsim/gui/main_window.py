@@ -543,7 +543,8 @@ class MainWindow(QMainWindow):
     def _on_run_done(self, result: dict) -> None:
         self._end_run()
         rows = result["rows"]
-        if result["reference_rebuilt"]:     # scores from the stale reference no longer hold
+        # A rebuilt reference, or the gallery a device run ended with, changes every frame score.
+        if result["reference_rebuilt"] or result["gallery_adopted"]:
             self._dense_points.clear()
             self._refresh_reference()
             self.show_frame(self._current)
@@ -562,6 +563,8 @@ class MainWindow(QMainWindow):
             message += f", {result['decode_failures']} failed frame reads"
         if result["reference_rebuilt"]:
             message += "; reference rebuilt under the current geometry"
+        if result["gallery_adopted"]:
+            message +="; gallery now holds what the run learned (Dense run to rescore the curve)"
         if result["frames_without_boxes"]:
             message += (f"; warning: {result['frames_without_boxes']} frame(s) had no boxes "
                         "(not in the box cache, no detector)")

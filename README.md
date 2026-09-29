@@ -40,7 +40,9 @@ References form the firmware's **reference gallery** (`flood_gallery.c`, up to 8
 scored against all of them and the best match counts. Device mode also learns references the way
 the device does (confidently dry but not yet covered) and flags a run of unmatched samples; see the
 `gallery_slot`, `admitted`, `notice` and `gallery_count` columns and `summary.txt`. Dense mode never
-learns. Every run starts from the manual references only.
+learns. On the command line every run starts from the manual references only. In the GUI a device
+run also starts from them, then the session keeps the gallery it ended with, so later dense runs,
+Score and the verdict use what was learned (Reset state drops it).
 
 Stage-1 boxes come from the device's traffic model at `models/traffic.onnx` (not in git;
 copy it there). Without it or `onnxruntime`, pass `--no-detector` (no obstruction veto) or have a complete

@@ -246,9 +246,15 @@ to the window.
   gives only 5 samples, too few to see references being learned or the 5-sample notice.
 - **Run ▸ Dense run…** asks for "score every Nth frame". Dense runs never learn references.
 
-**Every batch run starts from your manual references only.** What a device run learns shows in its
-rows (`admitted`, `gallery_count`) and is then discarded, so the same inputs always give the same
-results. References learned by manual *Sample* clicks are not used by batch runs either.
+**A device run starts from your manual references only**, so the same inputs always give the same
+rows (`admitted`, `gallery_count`, `slot`). **When it finishes, the session keeps the gallery the run
+ended with**, as the device keeps what it learns: the *Gallery* line then counts the learned
+references, and the curve, verdict, **Score** and **Dense run** score against them. Run **Dense
+run** again after a device run to redraw the curve with what was learned. **Reset state** goes back
+to the manual references only.
+
+**A dense run scores against the session's gallery as it is**, learned references included, and
+never changes it. `run.json` records how many learned references it used.
 
 A progress bar and **Cancel** appear. When the run finishes, results appear in the plot and the
 *Samples* table. **Double-click a row** to jump to its frame. The status bar reports:
@@ -511,7 +517,8 @@ numbers.
    reference** in the GUI) and run again: the notices should stop and correlation should rise.
 
 The same works in the GUI: add a reference, set the period in **Run ▸ Device run…**, and watch the
-*slot / learned / notice / refs* columns in the samples table.
+*slot / learned / notice / refs* columns in the samples table. Then run **Run ▸ Dense run…**: the
+curve now scores every frame against what the device run learned.
 
 ### Find out why a frame was judged a flood
 
