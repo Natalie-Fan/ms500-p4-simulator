@@ -197,7 +197,7 @@ to the window.
    Every frame you visit is now scored, and the verdict panel shows the result. Adding another
    reference (say, a dusk frame) **adds** it to the gallery rather than replacing the first. The
    *Gallery* line lists what is in it; **Reference ▸ Clear all references** empties it.
-   **View ▸ Show reference ▸ *n*** shows manual reference *n* in the main view, with the curb/lane
+   **View ▸ Show reference**, then a reference's entry, shows that manual reference in the main view, with the curb/lane
    overlays, in the grayscale the firmware compares against. Moving to any frame (or **Off**)
    returns to the footage. Learned references are not listed: they keep no image.
 3. **Check the lines.** If the red and blue lines don't sit on the curb and road in your footage,
