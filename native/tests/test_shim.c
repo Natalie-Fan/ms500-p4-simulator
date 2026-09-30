@@ -280,6 +280,100 @@ static void test_device_learning(void)
     sim_gallery_free(g);
 }
 
+#define ANCHOR 0.55f               /* FLOOD_GALLERY_MANUAL_ANCHOR_MIN */
+#define LIP    (1.0f / 7.0f)       /* water level of the gutter lip alone */
+
+/* Water climbs the curb face from the gutter lip in 2 % steps, one per sample. Each step
+ * resembles the last, so without an anchor the gallery learns its way up the face and keeps
+ * reporting clear. The property under test: nothing the manual reference already scores
+ * below the anchor is ever learned, and the near-full level is reported as a flood. */
+static void test_rising_flood_is_not_learned_away(void)
+{
+    float xs[512], lo[512], hi[512];
+    const int32_t n = sim_strip_outline(xs, lo, hi, 512);
+    uint8_t *frame = malloc((size_t)SYNTH_W * SYNTH_H);
+    void *g = sim_gallery_new();
+    void *manual = sim_gallery_new();     /* the manual reference alone, to read its score */
+    void *dev = sim_device_new();
+    sim_gallery_add_manual(g, g_dry);
+    sim_gallery_add_manual(manual, g_dry);
+
+    sim_result_t r;
+    sim_score_t s;
+    int admitted = 0, admitted_below_anchor = 0;
+    for (int k = 0; k < 42; ++k) {                       /* level 1/7 .. ~0.96 */
+        memcpy(frame, g_dry, (size_t)SYNTH_W * SYNTH_H);
+        synth_water(frame, xs, lo, hi, n, LIP + 0.02f * k, k, 8);
+        script_t step = { { frame, frame }, { 0, 0 }, { k, k }, 0 };
+        sim_device_sample(dev, g, scripted, &step, &r);
+        sim_score(manual, frame, NULL, 0, &s);
+        if (r.admitted) {
+            ++admitted;
+            if (s.curb_correlation < ANCHOR) ++admitted_below_anchor;
+        }
+    }
+    CHECK(admitted > 0);                   /* the low, lip-only levels are still learnable */
+    CHECK(admitted_below_anchor == 0);     /* no learning past the anchor */
+    CHECK(s.curb_correlation < 0.45f);     /* the manual reference calls the last level submerged */
+    CHECK(r.has_reading && r.outcome == 0);   /* ...and so does the device: upload */
+
+    sim_device_free(dev);
+    sim_gallery_free(manual);
+    sim_gallery_free(g);
+    free(frame);
+}
+
+/* Normal drain flow: only the gutter lip holds water, different in every frame. It must be
+ * reported clear every time, and still be learnable (the anchor must not block it). */
+static void test_normal_drain_flow_is_learned_and_clear(void)
+{
+    float xs[512], lo[512], hi[512];
+    const int32_t n = sim_strip_outline(xs, lo, hi, 512);
+    uint8_t *frame = malloc((size_t)SYNTH_W * SYNTH_H);
+    void *g = sim_gallery_new();
+    void *dev = sim_device_new();
+    sim_gallery_add_manual(g, g_dry);
+
+    sim_result_t r;
+    int admitted = 0;
+    for (int k = 0; k < 20; ++k) {
+        memcpy(frame, g_dry, (size_t)SYNTH_W * SYNTH_H);
+        synth_water(frame, xs, lo, hi, n, LIP, 1000 + 37 * k, 256);
+        script_t step = { { frame, frame }, { 0, 0 }, { k, k }, 0 };
+        sim_device_sample(dev, g, scripted, &step, &r);
+        CHECK(r.has_reading && r.outcome == 1);
+        admitted += r.admitted;
+    }
+    CHECK(admitted > 0);
+
+    sim_device_free(dev);
+    sim_gallery_free(g);
+    free(frame);
+}
+
+/* The camera moves with the wind. A learnable frame shifted 8 px down must still be learned:
+ * the anchor has to score the manual reference with registration, as detection does. */
+static void test_anchor_uses_registration(void)
+{
+    uint8_t *frame = malloc((size_t)SYNTH_W * SYNTH_H);
+    memcpy(frame, g_relit, (size_t)SYNTH_W * SYNTH_H);
+    memmove(frame + (size_t)8 * SYNTH_W, frame, (size_t)(SYNTH_H - 8) * SYNTH_W);
+    void *g = sim_gallery_new();
+    void *dev = sim_device_new();
+    sim_gallery_add_manual(g, g_dry);
+
+    sim_result_t r;
+    script_t shifted = { { frame, frame }, { 0, 0 }, { 0, 1 }, 0 };
+    sim_device_sample(dev, g, scripted, &shifted, &r);
+    CHECK(r.has_reading && r.shift_dy == 8);
+    CHECK(r.curb_correlation >= 0.65f && r.curb_correlation < 0.95f);
+    CHECK(r.admitted);
+
+    sim_device_free(dev);
+    sim_gallery_free(g);
+    free(frame);
+}
+
 static void test_band_coverage(void)
 {
     const sim_box_t road = { 0.0f, 900.0f, 1919.0f, 1079.0f, 0.9f, 2 };  /* below the lane line */
@@ -309,6 +403,9 @@ int main(void)
     test_gallery_full_of_manual();
     test_device();
     test_device_learning();
+    test_rising_flood_is_not_learned_away();
+    test_normal_drain_flow_is_learned_and_clear();
+    test_anchor_uses_registration();
     test_band_coverage();
 
     free(g_dry);

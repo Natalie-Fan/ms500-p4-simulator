@@ -21,4 +21,12 @@ void synth_flooded(uint8_t *gray);
  * dry_weight / sqrt(dry_weight^2 + other_weight^2). */
 void synth_relit(uint8_t *gray, int dry_weight, int other_weight, int seed);
 
+/* Water in the kerb strip, measured up from the strip's bottom edge: level 0 = none,
+ * 1/7 = the gutter lip only (the strip spans 30 % above to 5 % below the curb foot),
+ * 1 = the whole strip. The outline comes from sim_strip_outline() (columns 2 px apart).
+ * Water pixels are (128 - amplitude / 2) + texture % amplitude: amplitude 8 = still,
+ * almost featureless water; 256 = moving water that differs with every `seed`. */
+void synth_water(uint8_t *gray, const float *xs, const float *y_lo, const float *y_hi, int n,
+                 float level, int seed, int amplitude);
+
 #endif
