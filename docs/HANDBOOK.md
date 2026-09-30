@@ -83,7 +83,7 @@ ignores changes in brightness and contrast.
 | Term | Meaning |
 |---|---|
 | **Dry reference** | A frame of the same scene when it was dry. On the device it is captured by "Capture Baseline". |
-| **Reference gallery** | Up to 8 dry references, so a frame is compared against whichever one matches the current lighting (day, dusk, night…). Every frame is scored against all of them and the best match counts. **Manual** references are the ones you add; the device adds **learned** (auto) ones itself when a sample is confidently dry (0.65 ≤ correlation < 0.95) but not yet well covered. After 5 samples in a row between 0.45 and 0.65, it logs a *no confident match* notice: time to capture a baseline for that lighting. |
+| **Reference gallery** | Up to 8 dry references, so a frame is compared against whichever one matches the current lighting (day, dusk, night…). Every frame is scored against all of them and the best match counts. **Manual** references are the ones you add; the device adds **learned** (auto) ones itself when a sample is confidently dry (0.65 ≤ correlation < 0.95) but not yet well covered, **and** at least one manual reference still scores it ≥ 0.55 (so learning cannot follow a slowly rising flood). After 5 samples in a row between 0.45 and 0.65, it logs a *no confident match* notice: time to capture a baseline for that lighting. |
 | **Geometry** | Two lines you place on the image: the **curb line** (the curb's foot) and the **lane line** (below it, on the road). The sampled **kerb strip** is derived from them. |
 | **Correlation** | −1 … 1. It measures how much the curb strip still looks like the dry reference. **Below 0.45 = submerged.** |
 | **Severity** | From correlation: `none` ≥ 0.45 > `minor` ≥ 0.05 > `moderate` ≥ −0.10 > `severe`. |
@@ -563,6 +563,7 @@ curve now scores every frame against what the device run learned.
 | `geometry leaves no usable sampling window` | The lines overlap too little horizontally. Widen them. |
 | `reference gallery is full of manual baselines` | 8 manual references is the firmware's limit. Clear some (GUI: **Reference ▸ Clear all references**). |
 | No references learned on a short clip | Too few samples at the 60 s period. Use `--period 5` (GUI: the period in **Run ▸ Device run…**). |
+| Frames that look clearly dry are never learned | A manual reference must still score them ≥ 0.55 (the anchor). Strong shadows or night mode can score like a flood against every manual baseline: add a manual reference for that lighting. |
 | Every device sample is `skipped_no_ref` | No reference was given. |
 | Lots of `blocked` samples | The obstruction veto is firing. Look at the boxes in the GUI. With a single image or sparse stills, the "retry" re-reads the same frame, so it can't pass. |
 | GUI status: "N frame(s) had no boxes" | No detector and no cache for those frames, so their veto is missing. |
