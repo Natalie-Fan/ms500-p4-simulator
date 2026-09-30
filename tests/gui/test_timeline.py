@@ -1,6 +1,8 @@
+import datetime as dt
+
 import pytest
 
-from floodsim.gui.timeline import TimelineWidget
+from floodsim.gui.timeline import ClockAxis, TimelineWidget
 
 
 @pytest.fixture
@@ -69,3 +71,19 @@ def test_series(tl):
     x, _ = tl.curve.getData()
     assert x is None or len(x) == 0
     assert tl._blocked_item is None and tl._labels_item is None
+
+
+def test_clock_axis_gaps_and_clip_readout(qtbot, tl):
+    tl.set_times([0.0, 1.0, 2.0, 310.0, 311.0])
+    tl.set_clock(dt.datetime(2026, 6, 18, 23, 59, 50), [(3.0, 310.0)], [(0, "a.avi"), (3, "b.avi")])
+    axis = tl.plot.getAxis("bottom")
+    assert isinstance(axis, ClockAxis)
+    assert axis.tickStrings([0.0, 310.0], 1.0, 1.0) == ["06-18 23:59", "06-19 00:05"]   # spans two days
+    assert len(tl._gap_items) == 1
+    tl.set_frame(3)
+    assert tl.time_label.text() == "00:05:00 · b.avi · frame 4/5"
+    with qtbot.waitSignal(tl.seekFrame) as sig:
+        tl.seek_time(200.0)          # in the gap: nearest frame with footage is t=310
+    assert sig.args == [3]
+    tl.set_clock(None, [], [])
+    assert not isinstance(tl.plot.getAxis("bottom"), ClockAxis) and tl._gap_items == []

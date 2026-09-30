@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import bisect
+import datetime as dt
 
 import numpy as np
 from PySide6.QtCore import Qt, Signal
@@ -16,6 +17,19 @@ MARKER_Y = 1.08
 LABEL_Y0, LABEL_H = -1.33, 0.06
 
 
+class ClockAxis(pg.AxisItem):
+    """Seconds on the timeline shown as the time of day, counted from `start`."""
+
+    def __init__(self, start: dt.datetime, with_date: bool):
+        super().__init__("bottom")
+        self.start = start
+        self.with_date = with_date
+
+    def tickStrings(self, values, scale, spacing):
+        fmt = "%m-%d %H:%M" if self.with_date else "%H:%M"
+        return [(self.start + dt.timedelta(seconds=float(v))).strftime(fmt) for v in values]
+
+
 class TimelineWidget(QWidget):
     seekFrame = Signal(int)
     playToggled = Signal(bool)
@@ -23,6 +37,10 @@ class TimelineWidget(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self._times: list[float] = []
+        self._start: dt.datetime | None = None
+        self._gaps: list[tuple[float, float]] = []
+        self._clips: list[tuple[int, str]] = []
+        self._gap_items: list = []
         self._updating = False
         self._blocked_item = None
         self._labels_item = None
@@ -69,6 +87,7 @@ class TimelineWidget(QWidget):
 
     # ------------------------------------------------------------- frames
     def set_times(self, times) -> None:
+        self.set_clock(None, [], [])   # a new input starts without clock mode; clips set it again
         self._times = [float(t) for t in times]
         self._updating = True
         self.slider.setRange(0, max(len(self._times) - 1, 0))
@@ -89,7 +108,33 @@ class TimelineWidget(QWidget):
         self._updating = False
         t = self._times[idx]
         self.playhead.setValue(t)
-        self.time_label.setText(f"t = {t:.2f} s   frame {idx + 1}/{len(self._times)}")
+        if self._start is not None and self._clips:
+            clock = self._start + dt.timedelta(seconds=t)
+            k = bisect.bisect_right([first for first, _ in self._clips], idx) - 1
+            self.time_label.setText(f"{clock:%H:%M:%S} · {self._clips[k][1]} · frame {idx + 1}/{len(self._times)}")
+        else:
+            self.time_label.setText(f"t = {t:.2f} s   frame {idx + 1}/{len(self._times)}")
+
+    def set_clock(self, start, gaps, clips) -> None:
+        """Clock-time axis, shaded gaps and clip names for a folder of clips; start=None restores seconds."""
+        for item in self._gap_items:
+            self.plot.removeItem(item)
+        self._gap_items = []
+        was_clock = self._start is not None
+        self._start, self._gaps, self._clips = start, list(gaps), list(clips)
+        if start is None:
+            if was_clock:
+                self.plot.setAxisItems({"bottom": pg.AxisItem("bottom")})
+                self.plot.setLabel("bottom", "time", units="s")
+            return
+        end = start + dt.timedelta(seconds=self._times[-1] if self._times else 0.0)
+        self.plot.setAxisItems({"bottom": ClockAxis(start, end.date() != start.date())})
+        self.plot.setLabel("bottom", "time of day")
+        for a, b in self._gaps:
+            item = pg.LinearRegionItem((a, b), movable=False, brush=pg.mkBrush(200, 200, 200, 90),
+                                       pen=pg.mkPen(None))
+            self.plot.addItem(item)
+            self._gap_items.append(item)
 
     def frame_at_time(self, t: float) -> int | None:
         if not self._times:
@@ -99,6 +144,10 @@ class TimelineWidget(QWidget):
 
     def seek_time(self, t: float) -> None:
         idx = self.frame_at_time(t)
+        if any(a <= t < b for a, b in self._gaps):   # in a gap: the nearest frame with footage
+            j = bisect.bisect_left(self._times, t)
+            candidates = [i for i in (j - 1, j) if 0 <= i < len(self._times)]
+            idx = min(candidates, key=lambda i: abs(self._times[i] - t))
         if idx is not None:
             self.seekFrame.emit(idx)
 

@@ -15,6 +15,7 @@ from ..boxes import COCO_TO_FLOOD, CachedBox
 from ..errors import FloodSimError
 from ..geometry import Geometry, load_geometry, save_geometry
 from ..modes import RunParams
+from ..source import VIDEO_EXTS
 from .frame_view import FrameView, OverlayToggles, Tool
 from .panels import SamplesTable, ToolsPanel, VerdictPanel
 from .timeline import TimelineWidget
@@ -236,7 +237,9 @@ class MainWindow(QMainWindow):
                     return
             self._show_error(message)
 
-        self.statusBar().showMessage(f"Opening {path}…")
+        p = Path(path)
+        n_clips = sum(1 for f in p.iterdir() if f.suffix.lower() in VIDEO_EXTS) if p.is_dir() else 0
+        self.statusBar().showMessage(f"opening {n_clips} clips…" if n_clips else f"Opening {path}…")
         self.worker.submit(lambda: self.session.open(path, fps=fps, allow_stretch=allow_stretch,
                                                      no_detector=no_detector),
                            self._on_opened, failed)
@@ -251,13 +254,21 @@ class MainWindow(QMainWindow):
         self._manual_rows = []
         self._run_device_rows = []
         self.timeline.set_times(info["times"])
+        start = info.get("start_clock")
+        self.timeline.set_clock(start, info.get("gaps", []), info.get("clips", []))
+        self.verdict.set_start_clock(start)
         self.timeline.set_labels([])
         self.samples.set_rows([], "device")
         if self._overlay:
             self.verdict.show_state(0, self._overlay["heartbeat_every"])
         self.detector_label.setText("Detector: on" if info["detector"] else "Detector: off (cached/edited boxes only)")
         self.setWindowTitle(f"floodsim: {info['name']}")
-        self.statusBar().showMessage(f"{info['n_frames']} frame(s)", 5000)
+        if start is not None:
+            end = start + dt.timedelta(seconds=info["times"][-1])
+            self.statusBar().showMessage(
+                f"{len(info['clips'])} clips, {start:%H:%M}–{end:%H:%M}, {info['n_frames']} frames", 10000)
+        else:
+            self.statusBar().showMessage(f"{info['n_frames']} frame(s)", 5000)
         self._refresh_reference()
         self._navigate(0)
 
@@ -561,6 +572,8 @@ class MainWindow(QMainWindow):
             message += " (cancelled)"
         if result["decode_failures"]:
             message += f", {result['decode_failures']} failed frame reads"
+        if result.get("skipped_no_footage"):
+            message += f"; {result['skipped_no_footage']} check(s) skipped (no footage)"
         if result["reference_rebuilt"]:
             message += "; reference rebuilt under the current geometry"
         if result["gallery_adopted"]:

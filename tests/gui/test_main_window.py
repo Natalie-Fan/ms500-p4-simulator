@@ -4,12 +4,13 @@ from PySide6.QtCore import QPointF
 
 from floodsim.errors import FloodSimError
 from floodsim.gui import main_window as mw
+from floodsim.gui import timeline as mw_timeline
 from floodsim.gui.frame_view import Tool
 from floodsim.gui.main_window import MainWindow
 from floodsim.gui.session import Session
 from floodsim.gui.worker import Worker
 from floodsim.source import write_image
-from tests.synth import dry_gray, flooded_gray, to_rgb, write_frame_folder
+from tests.synth import dry_gray, dusk_gray, flooded_gray, to_rgb, write_clip, write_frame_folder
 
 T = 15000
 
@@ -228,3 +229,15 @@ def test_box_drawn_during_playback_lands_on_its_frame(qtbot, tmp_path, window, m
     store = window.session.boxes.store
     qtbot.waitUntil(lambda: bool(store.is_edited(0) or store.is_edited(1)), timeout=T)
     assert store.is_edited(0) and not store.is_edited(1)
+
+
+def test_open_folder_of_clips_shows_clock_time(qtbot, tmp_path, window):
+    folder = tmp_path / "day"
+    write_clip(folder, "20260618_160000", [dry_gray()] * 2)
+    write_clip(folder, "20260618_161000", [dusk_gray()] * 2)
+    _open(qtbot, window, folder, no_detector=True)
+    assert isinstance(window.timeline.plot.getAxis("bottom"), mw_timeline.ClockAxis)
+    assert len(window.timeline._gap_items) == 1
+    assert window.statusBar().currentMessage() == "2 clips, 16:00–16:10, 4 frames"
+    assert window.timeline.time_label.text().startswith("16:00:00 · record_20260618_160000.avi")
+    assert window.verdict._start is not None

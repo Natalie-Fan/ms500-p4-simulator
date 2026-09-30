@@ -1,3 +1,4 @@
+import datetime as dt
 import json
 from pathlib import Path
 
@@ -12,7 +13,7 @@ from floodsim.gui.session import Session
 from floodsim.modes import RunParams
 from floodsim.report import compare_runs, read_samples
 from floodsim.source import open_source, write_image
-from tests.synth import dry_gray, dusk_gray, flooded_gray, to_rgb, write_frame_folder
+from tests.synth import dry_gray, dusk_gray, flooded_gray, to_rgb, write_clip, write_frame_folder
 
 CAR = CachedBox(0.0, 0.0, 1919.0, 1079.0, 1.0, "car", 2)
 
@@ -307,3 +308,22 @@ def test_session_uses_its_model_for_the_box_cache(core, build_info, folder):
     s.open(folder, no_detector=True)
     assert s.boxes.store.meta["model"] == "other.onnx"
     assert s.boxes.store.meta["input"] == [416, 416]
+
+
+def test_session_opens_folder_of_clips(core, build_info, tmp_path):
+    folder = tmp_path / "day"
+    write_clip(folder, "20260618_160000", [dry_gray()] * 3)
+    write_clip(folder, "20260618_161000", [dusk_gray()] * 3)
+    s = Session(core, build_info)
+    info = s.open(folder, no_detector=True)
+    assert info["start_clock"] == dt.datetime(2026, 6, 18, 16, 0, 0)
+    assert info["gaps"] == [(3.0, 600.0)]
+    assert info["clips"] == [(0, "record_20260618_160000.avi"), (3, "record_20260618_161000.avi")]
+    s.set_reference_frame(0)
+    res = s.run_batch(RunParams(mode="device", period=60.0))
+    assert [r["t_sec"] for r in res["rows"]] == [0.0, 600.0]
+    assert res["skipped_no_footage"] == 9
+    assert "1 manual, 1 learned" in s.ref_status().description   # dusk learned, adopted
+    assert not (tmp_path / "day.boxes.csv").exists()             # per-clip fallback, not a folder cache
+    out = Path(s.export_run(tmp_path / "exp"))
+    assert "checks skipped (no footage): 9" in (out / "summary.txt").read_text()

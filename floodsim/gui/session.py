@@ -8,8 +8,8 @@ from pathlib import Path
 import cv2
 import numpy as np
 
-from ..boxes import (DEFAULT_CONF, DEFAULT_MODEL, BoxProvider, BoxStore, CachedBox, cache_meta,
-                     make_box_provider)
+from ..boxes import (DEFAULT_CONF, DEFAULT_MODEL, BoxProvider, BoxStore, CachedBox, ClipBoxes,
+                     cache_meta, make_box_provider)
 from ..errors import FloodSimError
 from ..geometry import Geometry
 from ..labels import Labels, score_rows
@@ -133,8 +133,11 @@ class Session:
             except FloodSimError as e:
                 log.warning("%s", e)
         if inner is None:
-            meta = cache_meta(src.fingerprint(), self.model, DEFAULT_CONF)
-            inner = BoxProvider(self.core, BoxStore(src.path, meta), None)
+            if hasattr(src, "clip_of"):
+                inner = ClipBoxes(self.core, src, self.model, DEFAULT_CONF, None)
+            else:
+                meta = cache_meta(src.fingerprint(), self.model, DEFAULT_CONF)
+                inner = BoxProvider(self.core, BoxStore(src.path, meta), None)
         if self.source is not None:
             for _, info in self.manual_refs:
                 if info["kind"] == "frame":
@@ -147,9 +150,13 @@ class Session:
         self.manual_rows.clear()
         self.run = None
         self.device.reset()
+        clock = getattr(src, "start_clock", None)
         return {"name": src.path.name, "n_frames": src.n_frames,
                 "times": [src.timestamp(i) for i in range(src.n_frames)],
-                "detector": inner.detector is not None}
+                "detector": inner.detector is not None,
+                "start_clock": clock,
+                "gaps": src.gaps() if clock else [],
+                "clips": src.clip_bounds() if clock else []}
 
     def _score(self, idx: int, rgb: np.ndarray, cached: list[CachedBox]) -> ScoreResult | None:
         if self.reference is None or not self.reference.ready:
@@ -355,7 +362,7 @@ class Session:
         return {"mode": params.mode, "rows": [dict(r) for r in out.rows],
                 "cancelled": out.cancelled, "decode_failures": out.decode_failures,
                 "reference_rebuilt": rebuilt, "frames_without_boxes": missing,
-                "gallery_adopted": adopted}
+                "gallery_adopted": adopted, "skipped_no_footage": out.skipped_no_footage}
 
     def label_spans(self) -> list[tuple[float, float, str]]:
         src = self.source
@@ -412,5 +419,5 @@ class Session:
         info["cancelled"] = result.cancelled
         write_run(out, info, result.rows, fields,
                   summarize(result.rows, params.mode, result.decode_failures, score,
-                            cancelled=result.cancelled))
+                            cancelled=result.cancelled, skipped_no_footage=result.skipped_no_footage))
         return str(out)

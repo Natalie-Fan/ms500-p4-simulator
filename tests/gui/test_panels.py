@@ -1,3 +1,5 @@
+import datetime as dt
+
 from floodsim.gui.frame_view import Tool
 from floodsim.gui.panels import SamplesTable, ToolsPanel, VerdictPanel
 from floodsim.gui.session import RefStatus
@@ -79,3 +81,11 @@ def test_samples_table(qtbot):
     s.add_row({"frame_idx": 5, "t_sec": 1.0, "submerged": True, "curb_correlation": 0.1,
                "severity": "minor", "veto_usable": True, "veto_coverage": 0.0}, "dense")
     assert s.rowCount() == 1   # switching mode resets the table
+
+
+def test_verdict_device_row_shows_clock_time(qtbot):
+    p = VerdictPanel()
+    qtbot.addWidget(p)
+    p.set_start_clock(dt.datetime(2026, 6, 18, 16, 0, 0))
+    p.show_device(dict(ROW, sample=165, t_sec=2920.0), 0.45)
+    assert p.source_label.text() == "device sample #165 at 16:48:40 (t = 2920 s)"

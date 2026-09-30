@@ -1,6 +1,8 @@
 """Left tools panel, right verdict/state panel, and the samples table."""
 from __future__ import annotations
 
+import datetime as dt
+
 from PySide6.QtCore import Signal
 from PySide6.QtWidgets import (QAbstractItemView, QButtonGroup, QFormLayout, QFrame, QLabel,
                                QPushButton, QRadioButton, QTableWidget, QTableWidgetItem,
@@ -81,6 +83,7 @@ class VerdictPanel(QWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
+        self._start = None
         layout = QVBoxLayout(self)
         layout.addWidget(QLabel("<b>Verdict</b>"))
         form = QFormLayout()
@@ -149,8 +152,15 @@ class VerdictPanel(QWidget):
         self.veto_label.setText(_veto(score.veto_usable, score.veto_coverage, score.veto_worst_class))
         self.matched_label.setText(f"slot {score.gallery_slot}" if score.gallery_slot >= 0 else DASH)
 
+    def set_start_clock(self, start) -> None:
+        """Clock time of t = 0 for a folder of clips; None for other inputs."""
+        self._start = start
+
     def show_device(self, row: dict, threshold: float | None) -> None:
-        self.source_label.setText(f"device sample #{row['sample']} at {row['t_sec']:.2f} s")
+        at = f"{row['t_sec']:.2f} s"
+        if self._start is not None:
+            at = f"{self._start + dt.timedelta(seconds=row['t_sec']):%H:%M:%S} (t = {row['t_sec']:.0f} s)"
+        self.source_label.setText(f"device sample #{row['sample']} at {at}")
         self._outcome(row["outcome"].upper(), row["outcome"])
         self.severity_label.setText(row["severity"])
         self.corr_label.setText(_corr(row["curb_correlation"], threshold) if row["has_reading"]
