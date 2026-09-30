@@ -113,3 +113,16 @@ def test_broken_clip_named(tmp_path):
     (folder / "record_20260618_120100.avi").write_bytes(b"not a video")
     with pytest.raises(FloodSimError, match="record_20260618_120100.avi"):
         open_source(folder)
+
+
+def test_non_16_9_clip_rejected_at_open(tmp_path):
+    import cv2
+    folder = tmp_path / "sizes"
+    write_clip(folder, "20260618_160000", [dry_gray()])
+    small = cv2.VideoWriter(str(folder / "record_20260618_161000.avi"), cv2.VideoWriter_fourcc(*"FFV1"),
+                            1.0, (640, 480))
+    small.write(np.zeros((480, 640, 3), np.uint8))
+    small.release()
+    with pytest.raises(FloodSimError, match=r"record_20260618_161000\.avi.*16:9"):
+        open_source(folder)                                   # fails at open, not mid-run
+    assert open_source(folder, allow_stretch=True).n_frames == 2

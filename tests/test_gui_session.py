@@ -324,6 +324,9 @@ def test_session_opens_folder_of_clips(core, build_info, tmp_path):
     assert [r["t_sec"] for r in res["rows"]] == [0.0, 600.0]
     assert res["skipped_no_footage"] == 9
     assert "1 manual, 1 learned" in s.ref_status().description   # dusk learned, adopted
-    assert not (tmp_path / "day.boxes.csv").exists()             # per-clip fallback, not a folder cache
+    # The no-detector fallback must route edits to the clip's own file, never a folder-level one.
+    s.set_boxes(3, [CachedBox(0.0, 0.0, 1919.0, 1079.0, 0.9, "car", 2)])
+    assert (folder / "record_20260618_161000.avi.boxes.edited.csv").exists()
+    assert not (tmp_path / "day.boxes.edited.csv").exists() and not (tmp_path / "day.boxes.csv").exists()
     out = Path(s.export_run(tmp_path / "exp"))
     assert "checks skipped (no footage): 9" in (out / "summary.txt").read_text()

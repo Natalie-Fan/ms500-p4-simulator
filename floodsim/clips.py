@@ -49,6 +49,7 @@ class MultiClipSource(FrameSource):
         for n, f in enumerate(ordered, 1):
             log.info("counting frames: %s (%d/%d)", f.name, n, len(ordered))
             clip = VideoSource(f, fps, normalizer)
+            clip.read_rgb(0)   # fail fast on a bad aspect ratio, at open, not hours into a run
             clip.close()
             self._clips.append(clip)
             offsets.append((starts[f] - self.start_clock).total_seconds())
