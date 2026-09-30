@@ -34,6 +34,8 @@ build/native/flood_sim.exe --reference out/exp/reference.pgm --frames out/exp/fr
     --boxes out/exp/boxes.csv --mode dense
 # lighting: several manual baselines, 5 s samples so a short clip shows the gallery learning
 .venv/Scripts/floodsim run clip.avi --reference noon.jpg --reference night.jpg --period 5
+# a day of recordings: every record_YYYYMMDD_HHMMSS.avi in the folder, at its real start time
+.venv/Scripts/floodsim run day_folder/ --reference noon.jpg
 ```
 
 References form the firmware's **reference gallery** (`flood_gallery.c`, up to 8): each frame is
@@ -43,6 +45,11 @@ the device does (confidently dry but not yet covered) and flags a run of unmatch
 learns. On the command line every run starts from the manual references only. In the GUI a device
 run also starts from them, then the session keeps the gallery it ended with, so later dense runs,
 Score and the verdict use what was learned (Reset state drops it).
+
+A folder of `record_YYYYMMDD_HHMMSS` videos opens as one timeline at the clips' real start times.
+Device checks that fall between clips are skipped (counted in `summary.txt`), the gallery carries
+from clip to clip, and each clip keeps its own `.boxes.csv`. `floodsim export` does not support
+such folders yet.
 
 Stage-1 boxes come from the device's traffic model at `models/traffic.onnx` (not in git;
 copy it there). Without it or `onnxruntime`, pass `--no-detector` (no obstruction veto) or have a complete

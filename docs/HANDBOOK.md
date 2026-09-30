@@ -203,6 +203,24 @@ to the window.
 3. **Check the lines.** If the red and blue lines don't sit on the curb and road in your footage,
    fix them first (next section). Everything depends on them.
 
+### A day of recordings (folder of clips)
+
+**File ▸ Open folder…** on a folder of videos named `record_YYYYMMDD_HHMMSS.avi` opens them as one
+timeline, each clip at its real start time (dates carry across midnight).
+
+- The time axis shows the time of day; stretches with no footage are shaded. The readout shows
+  the time, the clip and the frame.
+- A **Device run** checks every *period* seconds of real time. Checks that fall between clips are
+  skipped: no row, and the count appears as "checks skipped (no footage)" in the status bar and
+  `summary.txt`. The *sample* numbers keep their place, so a jump in them marks a gap.
+- The learned gallery and the heartbeat counter carry across clips, as on one device.
+- Each clip keeps its own `.boxes.csv` / `.boxes.edited.csv`, shared with opening that clip alone.
+- One edge case: an obstructed check in a clip's last second has its retry fall in the gap, so it
+  comes out `blocked` (on the device the retry would have had a frame).
+- Clip names must be `record_YYYYMMDD_HHMMSS`; a folder mixing videos and images is refused; if
+  two clips overlap, the earlier one's overlapping frames are dropped with a warning.
+- `floodsim export` (frames for `flood_sim.exe`) does not support folders of clips.
+
 ### Manual mode
 
 | Button | What it does |
@@ -564,6 +582,8 @@ curve now scores every frame against what the device run learned.
 | `reference gallery is full of manual baselines` | 8 manual references is the firmware's limit. Clear some (GUI: **Reference ▸ Clear all references**). |
 | No references learned on a short clip | Too few samples at the 60 s period. Use `--period 5` (GUI: the period in **Run ▸ Device run…**). |
 | Frames that look clearly dry are never learned | A manual reference must still score them ≥ 0.55 (the anchor). Strong shadows or night mode can score like a flood against every manual baseline: add a manual reference for that lighting. |
+| `clip names must be record_YYYYMMDD_HHMMSS.<ext>` | Rename the listed files; the start time comes from the name. |
+| `export does not support folders of clips` | Export a single clip instead. |
 | Every device sample is `skipped_no_ref` | No reference was given. |
 | Lots of `blocked` samples | The obstruction veto is firing. Look at the boxes in the GUI. With a single image or sparse stills, the "retry" re-reads the same frame, so it can't pass. |
 | GUI status: "N frame(s) had no boxes" | No detector and no cache for those frames, so their veto is missing. |
