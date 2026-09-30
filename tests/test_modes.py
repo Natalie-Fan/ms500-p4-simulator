@@ -3,8 +3,8 @@ import pytest
 
 from floodsim.modes import RunParams, UploadWriter, run_dense, run_device
 from floodsim.results import DENSE_FIELDS, DEVICE_FIELDS
-from floodsim.source import read_image_bgr
-from tests.synth import CAR, MemorySource, dry_gray, flooded_gray, to_rgb
+from floodsim.source import open_source, read_image_bgr
+from tests.synth import CAR, MemorySource, dry_gray, dusk_gray, flooded_gray, to_rgb, write_clip
 
 DRY, FLOOD = to_rgb(dry_gray()), to_rgb(flooded_gray())
 
@@ -77,3 +77,51 @@ def test_cancel_stops_run(core, ref):
     out = run_dense(core, _golden_source(), StaticBoxes({}), ref, RunParams(mode="dense"),
                     progress=lambda done, total: calls.append(done), cancel=lambda: len(calls) >= 2)
     assert out.cancelled and len(out.rows) == 2
+
+
+def _day_of_clips(tmp_path):
+    folder = tmp_path / "day"
+    write_clip(folder, "20260618_160000", [dry_gray()] * 3)    # t 0..2
+    write_clip(folder, "20260618_161000", [dusk_gray()] * 3)   # t 600..602
+    write_clip(folder, "20260618_163000", [dusk_gray()] * 3)   # t 1800..1802
+    return open_source(folder)
+
+
+def test_device_run_skips_gaps_and_carries_learning(core, tmp_path):
+    src = _day_of_clips(tmp_path)
+    g = core.new_gallery()
+    g.add_manual(dry_gray())
+    out = run_device(core, src, StaticBoxes({}), g, RunParams(period=60.0))
+    assert [r["sample"] for r in out.rows] == [0, 10, 30]
+    assert [r["t_sec"] for r in out.rows] == [0.0, 600.0, 1800.0]
+    assert out.skipped_no_footage == 28                       # 31 checks, 3 with footage
+    assert out.rows[1]["admitted"] is True                    # dusk learned in the second clip
+    assert out.rows[2]["gallery_source"] == "auto"            # ...and matched in the third
+    assert out.rows[2]["curb_correlation"] == pytest.approx(1.0, abs=1e-6)
+    assert [src.clip_of(r["frame_idx"])[0] for r in out.rows] == [0, 1, 2]
+
+
+def test_retry_past_clip_end_is_blocked(core, tmp_path):
+    folder = tmp_path / "edge"
+    write_clip(folder, "20260618_160000", [dry_gray()] * 2)     # t 0, 1
+    write_clip(folder, "20260618_160959", [dry_gray()] * 2)     # t 599, 600: footage to 601
+    src = open_source(folder)
+    g = core.new_gallery()
+    g.add_manual(dry_gray())
+    out = run_device(core, src, StaticBoxes({3: [CAR]}), g, RunParams(period=600.0))
+    edge = out.rows[1]
+    assert (edge["t_sec"], edge["frame_idx"]) == (600.0, 3)
+    assert (edge["outcome"], edge["frames_taken"]) == ("blocked", 2)   # retry at 601 is in the gap
+
+
+def test_dense_run_covers_every_clip_frame(core, tmp_path):
+    src = _day_of_clips(tmp_path)
+    g = core.new_gallery()
+    g.add_manual(dry_gray())
+    out = run_dense(core, src, StaticBoxes({}), g, RunParams(mode="dense"))
+    assert [r["frame_idx"] for r in out.rows] == list(range(9))
+
+
+def test_single_video_runs_are_unchanged(core, ref):
+    out = run_device(core, _golden_source(), StaticBoxes({}), ref, RunParams(period=60.0))
+    assert out.skipped_no_footage == 0

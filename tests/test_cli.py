@@ -7,7 +7,7 @@ from floodsim.boxes import DEFAULT_CONF, DEFAULT_MODEL, BoxStore, CachedBox, cac
 from floodsim.cli import main
 from floodsim.report import compare_runs, read_samples
 from floodsim.source import open_source, write_image
-from tests.synth import dry_gray, dusk_gray, flooded_gray, to_rgb, write_frame_folder
+from tests.synth import dry_gray, dusk_gray, flooded_gray, to_rgb, write_clip, write_frame_folder
 
 CAR = CachedBox(0.0, 0.0, 1919.0, 1079.0, 0.9, "car", 2)
 
@@ -136,3 +136,26 @@ def test_gui_accepts_model():
     from floodsim.cli import build_parser
     args = build_parser().parse_args(["gui", "--model", "models/other.onnx"])
     assert args.model == "models/other.onnx"
+
+
+def test_run_on_a_folder_of_clips(tmp_path):
+    import json
+    folder = tmp_path / "day"
+    write_clip(folder, "20260618_160000", [dry_gray()] * 3)
+    write_clip(folder, "20260618_161000", [dusk_gray()] * 3)
+    ref = tmp_path / "dry.png"
+    write_image(ref, to_rgb(dry_gray()))
+    assert main(["run", str(folder), "--reference", str(ref), "--no-detector", "--out", str(tmp_path / "r")]) == 0
+    rows = read_samples(tmp_path / "r")
+    assert [r["t_sec"] for r in rows] == ["0.000", "600.000"]
+    info = json.loads((tmp_path / "r" / "run.json").read_text())
+    assert info["start_clock"] == "2026-06-18T16:00:00"
+    assert len(info["input"]["clips"]) == 2
+    assert "checks skipped (no footage): 9" in (tmp_path / "r" / "summary.txt").read_text()
+
+
+def test_export_refuses_a_folder_of_clips(tmp_path, capsys):
+    folder = tmp_path / "day"
+    write_clip(folder, "20260618_160000", [dry_gray()] * 2)
+    assert main(["export", str(folder), "--no-detector", "--out", str(tmp_path / "e")]) == 2
+    assert "export does not support folders of clips" in capsys.readouterr().err

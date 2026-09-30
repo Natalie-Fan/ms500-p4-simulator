@@ -4,7 +4,7 @@ import pytest
 
 from floodsim.errors import FloodSimError
 from floodsim.report import (compare_runs, format_value, prepare_out_dir, read_samples,
-                             write_run, write_samples)
+                             summarize, write_run, write_samples)
 from floodsim.results import DENSE_FIELDS
 
 ROW = {"frame_idx": 0, "t_sec": 0.0, "veto_usable": True, "veto_coverage": 0.0,
@@ -66,3 +66,8 @@ def test_compare_reports_frame_choice(tmp_path):
     write_samples(a, [row], fields)
     write_samples(b, [dict(row, frame_idx=18012)], fields)
     assert any("frame_idx" in d for d in compare_runs(a, b))
+
+
+def test_summary_reports_skipped_checks_only_when_any():
+    assert "checks skipped (no footage): 5" in summarize([], "device", 0, None, skipped_no_footage=5)
+    assert "no footage" not in summarize([], "device", 0, None)

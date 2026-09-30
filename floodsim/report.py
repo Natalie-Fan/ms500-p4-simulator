@@ -79,12 +79,16 @@ def compare_runs(a: Path, b: Path, tol: float = 1e-6) -> list[str]:
 def make_run_info(*, source, mode: str, params, geometry, reference: dict, boxes: dict,
                   labels, build_info: dict, input_path) -> dict:
     """run.json content: inputs, settings and provenance (firmware commit, DLL)."""
-    return {
+    info = {
         "floodsim": __version__, "created": dt.datetime.now().isoformat(timespec="seconds"),
         "input": {"path": str(input_path), **source.fingerprint()}, "mode": mode, "params": asdict(params),
         "geometry": geometry.to_json_dict(), "reference": reference, "boxes": boxes,
         "labels": str(labels) if labels else None, **build_info,
     }
+    start_clock = getattr(source, "start_clock", None)
+    if start_clock is not None:
+        info["start_clock"] = start_clock.isoformat()
+    return info
 
 
 def prepare_out_dir(out: Path) -> Path:
@@ -96,8 +100,10 @@ def prepare_out_dir(out: Path) -> Path:
 
 
 def summarize(rows: list[dict], mode: str, decode_failures: int, score: dict | None,
-              cancelled: bool = False) -> str:
+              cancelled: bool = False, skipped_no_footage: int = 0) -> str:
     lines = [f"mode: {mode}", f"rows: {len(rows)}", f"failed frame reads: {decode_failures}"]
+    if skipped_no_footage:
+        lines.append(f"checks skipped (no footage): {skipped_no_footage}")
     if cancelled:
         lines.append("run cancelled: partial results")
     if mode == "device":

@@ -28,6 +28,7 @@ class RunOutput:
     rows: list[dict] = field(default_factory=list)
     decode_failures: int = 0
     cancelled: bool = False
+    skipped_no_footage: int = 0
 
 
 def device_row(sample: int, t: float, r: DeviceResult) -> dict:
@@ -105,11 +106,17 @@ def run_device(core, source, boxes, ref, params: RunParams, *, uploads: UploadWr
     device = core.new_device()
     out = RunOutput()
     total = int((source.duration + 1e-9) // params.period) + 1
+    has_footage = getattr(source, "has_footage", None)
     for k in range(total):
         if cancel and cancel():
             out.cancelled = True
             break
         t = k * params.period
+        if has_footage is not None and not has_footage(t):
+            out.skipped_no_footage += 1   # a gap between clips: nothing to show the device
+            if progress:
+                progress(k + 1, total)
+            continue
         r = sample_device_at(device, ref, feeder, t, params.retry_gap)
         out.rows.append(device_row(k, t, r))
         if uploads and r.outcome in ("upload", "heartbeat") and r.frame_idx >= 0:

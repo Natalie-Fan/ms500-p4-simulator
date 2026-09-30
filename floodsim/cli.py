@@ -154,7 +154,8 @@ def cmd_run(args) -> int:
                              reference=ref_info, boxes=boxes.description, labels=args.labels,
                              build_info=build_info, input_path=args.input)
     write_run(out, run_info, result.rows, fields,
-              summarize(result.rows, args.mode, result.decode_failures, score))
+              summarize(result.rows, args.mode, result.decode_failures, score,
+                        skipped_no_footage=result.skipped_no_footage))
     print(f"wrote {out}")
     return 0
 
@@ -183,6 +184,8 @@ def cmd_compare(args) -> int:
 def cmd_export(args) -> int:
     core, _ = load_core(rebuild=not args.no_rebuild)
     source = open_source(args.input, fps=args.fps, allow_stretch=args.allow_stretch)
+    if hasattr(source, "clip_of"):
+        raise FloodSimError("export does not support folders of clips; export a single clip")
     boxes = make_box_provider(core, source, no_detector=args.no_detector, model=args.model, conf=args.conf)
     out = prepare_out_dir(args.out)
     frames_dir = out / "frames"
