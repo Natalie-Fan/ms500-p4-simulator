@@ -286,7 +286,11 @@ static void test_device_learning(void)
 /* Water climbs the curb face from the gutter lip in 2 % steps, one per sample. Each step
  * resembles the last, so without an anchor the gallery learns its way up the face and keeps
  * reporting clear. The property under test: nothing the manual reference already scores
- * below the anchor is ever learned, and the near-full level is reported as a flood. */
+ * below the anchor is ever learned, and the near-full level is reported as a flood.
+ * Known limit, not a margin: the last admission is at ~70 % water, so levels ~82-94 % (which
+ * the manual reference already calls submerged) are still reported clear, and the upload at
+ * the final ~96 % step scores 0.438 against the 0.45 line. See the anchor spec's "Residual
+ * limits" section; do not read this test as proof that a plateaued flood is caught. */
 static void test_rising_flood_is_not_learned_away(void)
 {
     float xs[512], lo[512], hi[512];
