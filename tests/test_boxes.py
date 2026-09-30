@@ -1,10 +1,12 @@
 import pytest
 
+import floodsim.boxes as boxes_mod
 from floodsim.boxes import (DEFAULT_CONF, DEFAULT_MODEL, DEFAULT_NMS, BoxProvider, BoxStore, CachedBox,
-                            Detection, cache_meta, write_boxes_csv)
+                            ClipBoxes, Detection, cache_meta, make_box_provider, write_boxes_csv)
 from floodsim.errors import FloodSimError
 from floodsim.results import Box
-from tests.synth import dry_gray, to_rgb
+from floodsim.source import open_source
+from tests.synth import dry_gray, to_rgb, write_clip
 
 
 class FakeDetector:
@@ -174,3 +176,62 @@ def test_partly_written_frame_is_redetected(core, tmp_path):
     prov2, det2, store2 = _provider(core, tmp_path, [])
     assert store2.get(1) is None
     assert prov2.boxes_for(1, 0.25, lambda: RGB) == [] and det2.calls == 1
+
+
+def _two_clips(tmp_path):
+    folder = tmp_path / "day"
+    write_clip(folder, "20260618_120000", [dry_gray()] * 2)   # global frames 0, 1 at t 0, 1
+    write_clip(folder, "20260618_120100", [dry_gray()] * 2)   # global frames 2, 3 at t 60, 61
+    return folder, open_source(folder)
+
+
+def test_clip_boxes_use_each_clips_own_cache(core, tmp_path):
+    folder, src = _two_clips(tmp_path)
+    det = FakeDetector([Detection(10, 20, 30, 40, 0.8, "car")])
+    boxes = ClipBoxes(core, src, det.model_name, det.conf, det)
+    got = [boxes.boxes_for(i, src.timestamp(i), lambda i=i: src.read_rgb(i)) for i in range(4)]
+    assert det.calls == 4
+    assert (folder / "record_20260618_120000.avi.boxes.csv").exists()
+    assert (folder / "record_20260618_120100.avi.boxes.csv").exists()
+    assert not (tmp_path / "day.boxes.csv").exists()
+    # The second clip opened alone reuses its cache: its frame 1 is global frame 3.
+    single = open_source(folder / "record_20260618_120100.avi")
+    det2 = FakeDetector([])
+    alone = BoxProvider(core, BoxStore(single.path, cache_meta(single.fingerprint(), det2.model_name,
+                                                                det2.conf)), det2)
+    assert alone.boxes_for(1, 1.0, lambda: RGB) == got[3]
+    assert det2.calls == 0
+    assert boxes.description["kind"] == "clips" and len(boxes.description["clips"]) == 2
+
+
+def test_clip_boxes_edits_land_in_the_clip(core, tmp_path):
+    folder, src = _two_clips(tmp_path)
+    det = FakeDetector([])
+    boxes = ClipBoxes(core, src, det.model_name, det.conf, det)
+    edit = [CachedBox(1, 2, 3, 4, 1.0, "person", 1)]
+    boxes.store.set_edited(3, 61.0, edit)
+    assert boxes.store.is_edited(3) and not boxes.store.is_edited(0) and boxes.store.has_edits
+    assert boxes.boxes_for(3, 61.0, lambda: RGB) == [Box(1.0, 2.0, 3.0, 4.0, 1.0, 1)]
+    single = open_source(folder / "record_20260618_120100.avi")
+    alone = BoxStore(single.path, cache_meta(single.fingerprint(), det.model_name, det.conf))
+    assert alone.is_edited(1) and alone.get(1) == edit
+    boxes.store.clear_edited(3)
+    assert not boxes.store.is_edited(3)
+
+
+def test_make_box_provider_routes_clips(core, tmp_path, monkeypatch):
+    _, src = _two_clips(tmp_path)
+    monkeypatch.setattr(boxes_mod, "make_detector", lambda model, conf: FakeDetector([]))
+    boxes = make_box_provider(core, src, no_detector=False, model="fake.pt", conf=0.25)
+    assert isinstance(boxes, ClipBoxes) and boxes.detector is not None
+
+
+def test_make_box_provider_clips_without_detector_or_cache_fails(core, tmp_path, monkeypatch):
+    _, src = _two_clips(tmp_path)
+
+    def no_detector(model, conf):
+        raise FloodSimError("no runtime")
+
+    monkeypatch.setattr(boxes_mod, "make_detector", no_detector)
+    with pytest.raises(FloodSimError, match="no runtime"):
+        make_box_provider(core, src, no_detector=False, model="fake.pt", conf=0.25)

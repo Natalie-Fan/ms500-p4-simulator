@@ -292,10 +292,107 @@ class BoxProvider:
         return [c.to_box() for c in self.cached_for(idx, t, load_rgb)]
 
 
+class _ClipStores:
+    """Every clip's BoxStore seen as one store, addressed by global frame index (for the GUI)."""
+
+    def __init__(self, boxes: ClipBoxes):
+        self._boxes = boxes
+
+    def _at(self, idx: int):
+        ci, local, local_t = self._boxes.source.clip_of(idx)
+        return self._boxes.provider(ci).store, local, local_t
+
+    def get(self, idx: int) -> list[CachedBox] | None:
+        store, local, _ = self._at(idx)
+        return store.get(local)
+
+    def is_edited(self, idx: int) -> bool:
+        store, local, _ = self._at(idx)
+        return store.is_edited(local)
+
+    def set_edited(self, idx: int, t: float, boxes: list[CachedBox]) -> None:
+        store, local, local_t = self._at(idx)
+        store.set_edited(local, local_t, boxes)
+
+    def clear_edited(self, idx: int) -> None:
+        store, local, _ = self._at(idx)
+        store.clear_edited(local)
+
+    def _all(self):
+        return [self._boxes.provider(ci).store for ci in range(len(self._boxes.source.clip_bounds()))]
+
+    @property
+    def has_cache(self) -> bool:
+        return any(s.has_cache for s in self._all())
+
+    @property
+    def has_edits(self) -> bool:
+        return any(s.has_edits for s in self._all())
+
+    @property
+    def cache_path(self) -> Path:
+        return self._boxes.source.path / "*.boxes.csv"
+
+    @property
+    def edited_path(self) -> Path:
+        return self._boxes.source.path / "*.boxes.edited.csv"
+
+    @property
+    def meta(self) -> dict:
+        return {"model": self._boxes.model, "conf": self._boxes.conf}
+
+
+class ClipBoxes:
+    """Boxes for a folder of clips: each frame goes to its own clip's BoxProvider, whose cache is
+    exactly the one used when that clip is opened alone."""
+
+    def __init__(self, core, source, model: str, conf: float, detector: Detector | None):
+        self.core = core
+        self.source = source
+        self.model = model
+        self.conf = conf
+        self.detector = detector
+        self._providers: dict[int, BoxProvider] = {}
+        self.store = _ClipStores(self)
+
+    def provider(self, ci: int) -> BoxProvider:
+        prov = self._providers.get(ci)
+        if prov is None:
+            clip = self.source.clip_source(ci)
+            store = BoxStore(clip.path, cache_meta(clip.fingerprint(), self.model, self.conf))
+            prov = self._providers[ci] = BoxProvider(self.core, store, self.detector)
+        return prov
+
+    @property
+    def description(self) -> dict:
+        return {"kind": "clips", "detector": self.detector is not None,
+                "clips": [self._providers[ci].description for ci in sorted(self._providers)]}
+
+    def cached_for(self, idx: int, t: float,
+                   load_rgb: Callable[[], np.ndarray | None]) -> list[CachedBox]:
+        ci, local, local_t = self.source.clip_of(idx)
+        return self.provider(ci).cached_for(local, local_t, load_rgb)
+
+    def boxes_for(self, idx: int, t: float, load_rgb: Callable[[], np.ndarray | None]) -> list[Box]:
+        return [c.to_box() for c in self.cached_for(idx, t, load_rgb)]
+
+
 def make_box_provider(core, source, *, no_detector: bool, model: str = DEFAULT_MODEL,
-                      conf: float = DEFAULT_CONF) -> BoxProvider:
+                      conf: float = DEFAULT_CONF) -> BoxProvider | ClipBoxes:
     if no_detector:
         return BoxProvider.none(core)
+    if hasattr(source, "clip_of"):
+        try:
+            detector: Detector | None = make_detector(model, conf)
+            error = None
+        except FloodSimError as e:
+            detector, error = None, e
+        boxes = ClipBoxes(core, source, model, conf, detector)
+        if error is not None:
+            if not boxes.store.has_cache:
+                raise error
+            log.warning("%s; using the clips' cached boxes only", error)
+        return boxes
     store = BoxStore(source.path, cache_meta(source.fingerprint(), model, conf))
     try:
         detector: Detector | None = make_detector(model, conf)
