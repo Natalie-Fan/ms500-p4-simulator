@@ -4,6 +4,7 @@ from __future__ import annotations
 from functools import lru_cache
 from pathlib import Path
 
+import cv2
 import numpy as np
 
 from floodsim.results import Box
@@ -90,3 +91,16 @@ def write_frame_folder(folder: Path, frames) -> Path:
     for i, (t_ms, gray) in enumerate(frames):
         write_image(folder / f"f{i:06d}_t{t_ms:010d}.png", to_rgb(gray))
     return folder
+
+
+def write_clip(folder: Path, start: str, grays, fps: float = 1.0) -> Path:
+    """Lossless (FFV1) clip named record_<start>.avi, e.g. start="20260618_164320". Gray in all
+    three channels, so the firmware gray formula returns each frame exactly."""
+    folder.mkdir(parents=True, exist_ok=True)
+    path = folder / f"record_{start}.avi"
+    writer = cv2.VideoWriter(str(path), cv2.VideoWriter_fourcc(*"FFV1"), fps, (FRAME_W, FRAME_H))
+    assert writer.isOpened(), "this OpenCV build cannot write FFV1"
+    for gray in grays:
+        writer.write(np.repeat(gray[:, :, None], 3, axis=2))
+    writer.release()
+    return path

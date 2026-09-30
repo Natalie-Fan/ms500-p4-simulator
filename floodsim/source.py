@@ -14,6 +14,7 @@ from .errors import FloodSimError
 
 FRAME_W, FRAME_H = 1920, 1080
 IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".bmp", ".pgm", ".ppm", ".tif", ".tiff"}
+VIDEO_EXTS = {".avi", ".mp4", ".mkv", ".mov"}
 _T_MS = re.compile(r"_t(\d+)")
 log = logging.getLogger(__name__)
 
@@ -134,6 +135,7 @@ class VideoSource(FrameSource):
         fps = fps or self._cap.get(cv2.CAP_PROP_FPS)
         if not fps or fps <= 0:
             raise FloodSimError(f"{path}: video reports no frame rate; pass --fps")
+        self.fps = float(fps)
         n = 0
         while self._cap.grab():  # count by walking: container frame counts lie for MJPEG AVIs
             n += 1
@@ -156,10 +158,21 @@ class VideoSource(FrameSource):
             raise FloodSimError(f"cannot open video {self.path}{hint}")
         return cap
 
+    def close(self) -> None:
+        """Release the capture and cached frames; the next read reopens lazily."""
+        if self._cap is not None:
+            self._cap.release()
+        self._cap = None
+        self._pos = 0
+        self._cache.clear()
+
     def read_rgb(self, idx: int) -> np.ndarray | None:
         if idx in self._cache:
             self._cache.move_to_end(idx)
             return self._cache[idx]
+        if self._cap is None:
+            self._cap = self._open()
+            self._pos = 0
         if idx < self._pos:
             self._cap.release()
             self._cap = self._open()
@@ -191,10 +204,18 @@ def open_source(path: Path, *, fps: float | None = None, allow_stretch: bool = F
         raise FloodSimError(f"input not found: {path}")
     normalizer = Normalizer(allow_stretch)
     if path.is_dir():
-        files = sorted(f for f in path.iterdir() if f.suffix.lower() in IMAGE_EXTS)
-        if not files:
-            raise FloodSimError(f"{path}: no image files")
-        src: FrameSource = ImageSequence(path, files, fps, normalizer)
+        entries = [f for f in path.iterdir() if f.is_file()]
+        images = sorted(f for f in entries if f.suffix.lower() in IMAGE_EXTS)
+        videos = sorted(f for f in entries if f.suffix.lower() in VIDEO_EXTS)
+        if images and videos:
+            raise FloodSimError(f"{path}: contains both videos and images; put them in separate folders")
+        if videos:
+            from .clips import MultiClipSource   # clips imports this module
+            src: FrameSource = MultiClipSource(path, videos, fps, normalizer)
+        elif images:
+            src = ImageSequence(path, images, fps, normalizer)
+        else:
+            raise FloodSimError(f"{path}: no image or video files")
     elif path.suffix.lower() in IMAGE_EXTS:
         src = ImageSequence(path, [path], fps, normalizer)
     else:
