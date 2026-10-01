@@ -251,9 +251,11 @@ static void test_device_learning(void)
     CHECK(s.curb_correlation >= 0.45f && s.curb_correlation < 0.65f);
 
     script_t relit = { { g_relit, g_relit }, { 0, 0 }, { 10, 11 }, 0 };
-    sim_device_sample(dev, g, scripted, &relit, &r);
+    sim_device_sample(dev, g, scripted, &relit, &r);            /* candidate only */
     CHECK(r.has_reading && r.gallery_slot == 0 && r.gallery_source == 0);
-    CHECK(r.admitted && r.gallery_count == 2);
+    CHECK(!r.admitted && r.candidate_pending && r.gallery_count == 1);
+    sim_device_sample(dev, g, scripted, &relit, &r);            /* proven: becomes a slot */
+    CHECK(r.admitted && !r.candidate_pending && r.gallery_count == 2);
     int32_t source = -1;
     CHECK(sim_gallery_slot(g, 1, &source, NULL) == 1 && source == 1);
 
@@ -261,7 +263,7 @@ static void test_device_learning(void)
     sim_device_sample(dev, g, scripted, &relit, &r);
     CHECK(r.gallery_slot == 1 && r.gallery_source == 1);
     CHECK(fabsf(r.curb_correlation - 1.0f) < 1e-6f);
-    CHECK(!r.admitted && r.gallery_count == 2);
+    CHECK(!r.admitted && !r.candidate_pending && r.gallery_count == 2);
 
     /* FLOOD_GALLERY_AMBIGUOUS_STREAK_CYCLES (5) ambiguous readings in a row:
      * the notice fires on the 5th only, and nothing is learned. */
@@ -287,6 +289,8 @@ static void test_device_learning(void)
  * resembles the last, so without an anchor the gallery learns its way up the face and keeps
  * reporting clear. The property under test: nothing the manual reference already scores
  * below the anchor is ever learned, and the near-full level is reported as a flood.
+ * A learned reference is the previous reading's frame (proven by this one), so the anchor is
+ * checked against that frame's manual score.
  * Known limit, not a margin: the last admission is at ~70 % water, so levels ~82-94 % (which
  * the manual reference already calls submerged) are still reported clear, and the upload at
  * the final ~96 % step scores 0.438 against the 0.45 line. See the anchor spec's "Residual
@@ -305,6 +309,7 @@ static void test_rising_flood_is_not_learned_away(void)
     sim_result_t r;
     sim_score_t s;
     int admitted = 0, admitted_below_anchor = 0;
+    float prev_manual = 1.0f;                            /* manual score of the candidate's frame */
     for (int k = 0; k < 42; ++k) {                       /* level 1/7 .. ~0.96 */
         memcpy(frame, g_dry, (size_t)SYNTH_W * SYNTH_H);
         synth_water(frame, xs, lo, hi, n, LIP + 0.02f * k, k, 8);
@@ -313,8 +318,9 @@ static void test_rising_flood_is_not_learned_away(void)
         sim_score(manual, frame, NULL, 0, &s);
         if (r.admitted) {
             ++admitted;
-            if (s.curb_correlation < ANCHOR) ++admitted_below_anchor;
+            if (prev_manual < ANCHOR) ++admitted_below_anchor;
         }
+        prev_manual = s.curb_correlation;
     }
     CHECK(admitted > 0);                   /* the low, lip-only levels are still learnable */
     CHECK(admitted_below_anchor == 0);     /* no learning past the anchor */
@@ -327,9 +333,9 @@ static void test_rising_flood_is_not_learned_away(void)
     free(frame);
 }
 
-/* Normal drain flow: only the gutter lip holds water, different in every frame. It must be
- * reported clear every time, and still be learnable (the anchor must not block it). */
-static void test_normal_drain_flow_is_learned_and_clear(void)
+/* Normal drain flow: only the gutter lip holds water, different in every frame. It is reported
+ * clear and never learned: each candidate fails its proof. */
+static void test_normal_drain_flow_is_not_learned(void)
 {
     float xs[512], lo[512], hi[512];
     const int32_t n = sim_strip_outline(xs, lo, hi, 512);
@@ -348,7 +354,7 @@ static void test_normal_drain_flow_is_learned_and_clear(void)
         CHECK(r.has_reading && r.outcome == 1);
         admitted += r.admitted;
     }
-    CHECK(admitted > 0);
+    CHECK(admitted == 0);
 
     sim_device_free(dev);
     sim_gallery_free(g);
@@ -369,6 +375,8 @@ static void test_anchor_uses_registration(void)
     sim_result_t r;
     script_t shifted = { { frame, frame }, { 0, 0 }, { 0, 1 }, 0 };
     sim_device_sample(dev, g, scripted, &shifted, &r);
+    CHECK(r.candidate_pending);
+    sim_device_sample(dev, g, scripted, &shifted, &r);
     CHECK(r.has_reading && r.shift_dy == 8);
     CHECK(r.curb_correlation >= 0.65f && r.curb_correlation < 0.95f);
     CHECK(r.admitted);
@@ -376,6 +384,79 @@ static void test_anchor_uses_registration(void)
     sim_device_free(dev);
     sim_gallery_free(g);
     free(frame);
+}
+
+/* Rain-like streaks: the kerb rows change differently every reading. Never proven. */
+static void test_transient_noise_not_learned(void)
+{
+    uint8_t *frame = malloc((size_t)SYNTH_W * SYNTH_H);
+    void *g = sim_gallery_new();
+    void *dev = sim_device_new();
+    sim_gallery_add_manual(g, g_dry);
+    sim_result_t r;
+    int admitted = 0;
+    for (int k = 0; k < 10; ++k) {
+        synth_relit(frame, 4, 3, 5000 + 97 * k);
+        script_t step = { { frame, frame }, { 0, 0 }, { k, k }, 0 };
+        sim_device_sample(dev, g, scripted, &step, &r);
+        admitted += r.admitted;
+    }
+    CHECK(admitted == 0 && sim_gallery_count(g) == 1);
+    sim_device_free(dev);
+    sim_gallery_free(g);
+    free(frame);
+}
+
+/* A car over the curb between candidate and proof must not drop the candidate. */
+static void test_candidate_survives_blocked_sample(void)
+{
+    void *g = sim_gallery_new();
+    void *dev = sim_device_new();
+    sim_gallery_add_manual(g, g_dry);
+    sim_result_t r;
+    script_t relit = { { g_relit, g_relit }, { 0, 0 }, { 0, 1 }, 0 };
+    script_t blocked = { { g_relit, g_relit }, { 1, 1 }, { 2, 3 }, 0 };
+    sim_device_sample(dev, g, scripted, &relit, &r);
+    CHECK(r.candidate_pending);
+    sim_device_sample(dev, g, scripted, &blocked, &r);
+    CHECK(!r.has_reading && r.candidate_pending && !r.admitted);
+    sim_device_sample(dev, g, scripted, &relit, &r);
+    CHECK(r.admitted && sim_gallery_count(g) == 2);
+    sim_device_free(dev);
+    sim_gallery_free(g);
+}
+
+/* An operator captures this lighting manually while a candidate is pending: the next reading is
+ * already covered by the manual slot, so the candidate is not promoted as a duplicate. */
+static void test_candidate_not_promoted_when_already_covered(void)
+{
+    void *g = sim_gallery_new();
+    void *dev = sim_device_new();
+    sim_gallery_add_manual(g, g_dry);
+    sim_result_t r;
+    script_t relit = { { g_relit, g_relit }, { 0, 0 }, { 0, 1 }, 0 };
+    sim_device_sample(dev, g, scripted, &relit, &r);
+    CHECK(r.candidate_pending);
+    CHECK(sim_gallery_add_manual(g, g_relit) == 1);
+    sim_device_sample(dev, g, scripted, &relit, &r);
+    CHECK(!r.admitted && !r.candidate_pending && sim_gallery_count(g) == 2);
+    sim_device_free(dev);
+    sim_gallery_free(g);
+}
+
+/* A proven candidate with nowhere to go (all 8 slots MANUAL) is dropped quietly. */
+static void test_full_manual_gallery_drops_proven_candidate(void)
+{
+    void *g = sim_gallery_new();
+    void *dev = sim_device_new();
+    for (int i = 0; i < 8; ++i) sim_gallery_add_manual(g, g_dry);
+    sim_result_t r;
+    script_t relit = { { g_relit, g_relit }, { 0, 0 }, { 0, 1 }, 0 };
+    sim_device_sample(dev, g, scripted, &relit, &r);
+    sim_device_sample(dev, g, scripted, &relit, &r);
+    CHECK(!r.admitted && sim_gallery_count(g) == 8);
+    sim_device_free(dev);
+    sim_gallery_free(g);
 }
 
 static void test_band_coverage(void)
@@ -408,8 +489,12 @@ int main(void)
     test_device();
     test_device_learning();
     test_rising_flood_is_not_learned_away();
-    test_normal_drain_flow_is_learned_and_clear();
+    test_normal_drain_flow_is_not_learned();
     test_anchor_uses_registration();
+    test_transient_noise_not_learned();
+    test_candidate_survives_blocked_sample();
+    test_candidate_not_promoted_when_already_covered();
+    test_full_manual_gallery_drops_proven_candidate();
     test_band_coverage();
 
     free(g_dry);

@@ -22,7 +22,7 @@ FLOOD_SUBDIR = "components/as_code/process_flood_detection"
 DLL_NAME = "flood_core.dll"
 EXE_NAME = "flood_sim.exe"
 STAMP_NAME = "floodsim.stamp"
-ABI_VERSION = 3
+ABI_VERSION = 4
 FRAME_W, FRAME_H = 1920, 1080
 MAX_BOXES = 32
 
@@ -143,7 +143,8 @@ class _SimResult(ctypes.Structure):
                 ("shift_dy", c_int32), ("veto_usable", c_int32), ("veto_coverage", c_float),
                 ("veto_worst_class", c_int32), ("since_image", c_int32), ("frame_idx", c_int32),
                 ("gallery_slot", c_int32), ("gallery_source", c_int32), ("admitted", c_int32),
-                ("notice", c_int32), ("gallery_count", c_int32)]
+                ("notice", c_int32), ("gallery_count", c_int32),
+                ("candidate_pending", c_int32)]
 
 
 # flood_ref_source_t order, flood_gallery.h
@@ -330,7 +331,8 @@ class Core:
             veto_worst_class=self.class_name(r.veto_worst_class), since_image=r.since_image,
             frame_idx=r.frame_idx, gallery_slot=r.gallery_slot,
             gallery_source=source_name(r.gallery_source), admitted=bool(r.admitted),
-            notice=bool(r.notice), gallery_count=r.gallery_count)
+            notice=bool(r.notice), gallery_count=r.gallery_count,
+            candidate_pending=bool(r.candidate_pending))
 
 
 class Gallery:

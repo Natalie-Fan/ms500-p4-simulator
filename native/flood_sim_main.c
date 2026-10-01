@@ -85,13 +85,13 @@ static void print_device(int sample, double t, const sim_result_t *r)
            "\"frames_taken\":%d,\"has_reading\":%s,\"curb_correlation\":%.6f,\"severity\":\"%s\","
            "\"shift_dx\":%d,\"shift_dy\":%d,\"veto_usable\":%s,\"veto_coverage\":%.6f,"
            "\"veto_worst_class\":\"%s\",\"since_image\":%d,\"gallery_slot\":%d,"
-           "\"gallery_source\":\"%s\",\"admitted\":%s,\"notice\":%s,\"gallery_count\":%d}\n",
+           "\"gallery_source\":\"%s\",\"admitted\":%s,\"notice\":%s,\"gallery_count\":%d,\"candidate_pending\":%s}\n",
            sample, t, r->frame_idx, sim_outcome_name(r->outcome), r->frames_taken,
            json_bool(r->has_reading), r->curb_correlation, sim_severity_name(r->severity),
            r->shift_dx, r->shift_dy, json_bool(r->veto_usable), r->veto_coverage,
            sim_class_name(r->veto_worst_class), r->since_image, r->gallery_slot,
            source_name(r->gallery_source), json_bool(r->admitted), json_bool(r->notice),
-           r->gallery_count);
+           r->gallery_count, json_bool(r->candidate_pending));
 }
 
 static void print_dense(int32_t frame_idx, double t, const sim_score_t *s)

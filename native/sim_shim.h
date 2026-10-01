@@ -12,7 +12,7 @@
 #define SIM_API
 #endif
 
-#define SIM_ABI_VERSION        3
+#define SIM_ABI_VERSION        4
 #define SIM_FRAME_W            1920
 #define SIM_FRAME_H            1080
 #define SIM_MAX_BOXES          32     /* FLOOD_VETO_MAX_BOXES */
@@ -55,6 +55,7 @@ typedef struct {
     int32_t admitted;                 /* this sample auto-admitted a new reference */
     int32_t notice;                   /* this sample raised the "no confident match" notice */
     int32_t gallery_count;            /* in-use slots after this sample */
+    int32_t candidate_pending;        /* a learning candidate awaits its confirming reading */
 } sim_result_t;
 
 /* Fills the frame for `attempt` (0 = sample time, 1 = retry). gray_out holds

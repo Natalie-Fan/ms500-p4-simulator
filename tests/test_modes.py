@@ -95,9 +95,8 @@ def test_device_run_skips_gaps_and_carries_learning(core, tmp_path):
     assert [r["sample"] for r in out.rows] == [0, 10, 30]
     assert [r["t_sec"] for r in out.rows] == [0.0, 600.0, 1800.0]
     assert out.skipped_no_footage == 28                       # 31 checks, 3 with footage
-    assert out.rows[1]["admitted"] is True                    # dusk learned in the second clip
-    assert out.rows[2]["gallery_source"] == "auto"            # ...and matched in the third
-    assert out.rows[2]["curb_correlation"] == pytest.approx(1.0, abs=1e-6)
+    assert out.rows[1]["admitted"] is False and out.rows[1]["candidate_pending"] is True
+    assert out.rows[2]["admitted"] is True           # proven by the third clip, across the gap
     assert [src.clip_of(r["frame_idx"])[0] for r in out.rows] == [0, 1, 2]
 
 

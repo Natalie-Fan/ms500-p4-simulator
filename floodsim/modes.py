@@ -39,7 +39,7 @@ def device_row(sample: int, t: float, r: DeviceResult) -> dict:
             "veto_coverage": r.veto_coverage, "veto_worst_class": r.veto_worst_class,
             "since_image": r.since_image, "gallery_slot": r.gallery_slot,
             "gallery_source": r.gallery_source, "admitted": r.admitted, "notice": r.notice,
-            "gallery_count": r.gallery_count}
+            "gallery_count": r.gallery_count, "candidate_pending": r.candidate_pending}
 
 
 def dense_row(idx: int, t: float, s: ScoreResult) -> dict:

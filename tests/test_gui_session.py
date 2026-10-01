@@ -253,15 +253,16 @@ def test_manual_sample_learns_and_reset_forgets(core, build_info, tmp_path):
     s = Session(core, build_info)
     s.open(clip, no_detector=True)
     s.set_reference_frame(0)
+    s.sample(1)
     row = s.sample(1)
     assert row["admitted"] and row["gallery_count"] == 2
     assert "2 reference(s): 1 manual, 1 learned" in s.ref_status().description
     assert s.frame(1).score.gallery_slot == 1      # frame scores see the learned reference
-    # A device run starts from the manual baselines only (it learns dusk again at 60 s,
-    # although the session already had it), then the session adopts its final gallery.
+    # A device run starts from the manual baselines only (dusk at 60 s is a candidate again,
+    # still pending at the end of the run), then the session adopts its final gallery.
     res = s.run_batch(RunParams(mode="device", period=60.0))
-    assert [r["admitted"] for r in res["rows"]] == [False, True]
-    assert res["gallery_adopted"] and s.reference.count == 2
+    assert [r["candidate_pending"] for r in res["rows"]] == [False, True]
+    assert res["gallery_adopted"] and s.reference.count == 1
     s.reset_device()
     assert "1 reference(s): 1 manual, 0 learned" in s.ref_status().description
     s.set_reference_frame(1)
@@ -271,7 +272,8 @@ def test_manual_sample_learns_and_reset_forgets(core, build_info, tmp_path):
 
 
 def test_device_run_learning_carries_into_scores_and_dense_runs(core, build_info, tmp_path):
-    clip = write_frame_folder(tmp_path / "day", [(0, dry_gray()), (60000, dusk_gray())])
+    clip = write_frame_folder(tmp_path / "day", [(0, dry_gray()), (60000, dusk_gray()),
+                                                 (120000, dusk_gray())])
     s = Session(core, build_info)
     s.open(clip, no_detector=True)
     s.set_reference_frame(0)
@@ -287,7 +289,7 @@ def test_device_run_learning_carries_into_scores_and_dense_runs(core, build_info
 
     # A second device run still starts from the manual baselines: same rows as the first.
     again = s.run_batch(RunParams(mode="device", period=60.0))["rows"]
-    assert [r["admitted"] for r in again] == [False, True]
+    assert [r["admitted"] for r in again] == [False, False, True]
     s.reset_device()
     assert "1 manual, 0 learned" in s.ref_status().description
 
@@ -314,19 +316,21 @@ def test_session_opens_folder_of_clips(core, build_info, tmp_path):
     folder = tmp_path / "day"
     write_clip(folder, "20260618_160000", [dry_gray()] * 3)
     write_clip(folder, "20260618_161000", [dusk_gray()] * 3)
+    write_clip(folder, "20260618_162000", [dusk_gray()] * 3)
     s = Session(core, build_info)
     info = s.open(folder, no_detector=True)
     assert info["start_clock"] == dt.datetime(2026, 6, 18, 16, 0, 0)
-    assert info["gaps"] == [(3.0, 600.0)]
-    assert info["clips"] == [(0, "record_20260618_160000.avi"), (3, "record_20260618_161000.avi")]
+    assert info["gaps"] == [(3.0, 600.0), (603.0, 1200.0)]
+    assert info["clips"] == [(0, "record_20260618_160000.avi"), (3, "record_20260618_161000.avi"),
+                             (6, "record_20260618_162000.avi")]
     s.set_reference_frame(0)
     res = s.run_batch(RunParams(mode="device", period=60.0))
-    assert [r["t_sec"] for r in res["rows"]] == [0.0, 600.0]
-    assert res["skipped_no_footage"] == 9
+    assert [r["t_sec"] for r in res["rows"]] == [0.0, 600.0, 1200.0]
+    assert res["skipped_no_footage"] == 18
     assert "1 manual, 1 learned" in s.ref_status().description   # dusk learned, adopted
     # The no-detector fallback must route edits to the clip's own file, never a folder-level one.
     s.set_boxes(3, [CachedBox(0.0, 0.0, 1919.0, 1079.0, 0.9, "car", 2)])
     assert (folder / "record_20260618_161000.avi.boxes.edited.csv").exists()
     assert not (tmp_path / "day.boxes.edited.csv").exists() and not (tmp_path / "day.boxes.csv").exists()
     out = Path(s.export_run(tmp_path / "exp"))
-    assert "checks skipped (no footage): 9" in (out / "summary.txt").read_text()
+    assert "checks skipped (no footage): 18" in (out / "summary.txt").read_text()

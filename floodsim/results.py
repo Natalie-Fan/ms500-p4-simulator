@@ -47,6 +47,7 @@ class DeviceResult:
     admitted: bool             # this sample learned a new AUTO reference
     notice: bool               # this sample raised the "no confident match" notice
     gallery_count: int         # references in the gallery after this sample
+    candidate_pending: bool       # a learning candidate awaits its confirming reading
 
 
 # Column order of samples.csv; identical to flood_sim.exe's JSON keys (minus "mode").
@@ -55,6 +56,7 @@ DEVICE_FIELDS = [
     "curb_correlation", "severity", "shift_dx", "shift_dy", "veto_usable",
     "veto_coverage", "veto_worst_class", "since_image",
     "gallery_slot", "gallery_source", "admitted", "notice", "gallery_count",
+    "candidate_pending",
 ]
 DENSE_FIELDS = [
     "frame_idx", "t_sec", "veto_usable", "veto_coverage", "veto_worst_class",

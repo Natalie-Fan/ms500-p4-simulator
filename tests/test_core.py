@@ -14,7 +14,7 @@ from tests.synth import CAR, dry_gray, dusk_gray, flooded_gray, night_gray
 
 
 def test_build_info_records_dll_and_firmware(build_info):
-    assert build_info["dll"]["abi"] == core_mod.ABI_VERSION == 3
+    assert build_info["dll"]["abi"] == core_mod.ABI_VERSION == 4
     assert build_info["dll"]["stale"] is False
     assert Path(build_info["firmware"]["dir"]).name == "NETWORK_P4_FLOOD_DETECTION"
     assert "commit" in build_info["firmware"] and "dirty" in build_info["firmware"]
@@ -166,6 +166,8 @@ def test_device_learns_new_lighting_and_notices_unmatched(core):
     g.add_manual(dry_gray())
     dev = core.new_device()
     dusk = _provider([(dusk_gray(), [], 7)] * 2)
+    r = dev.sample(g, dusk)
+    assert (r.admitted, r.candidate_pending, r.gallery_count) == (False, True, 1)
     r = dev.sample(g, dusk)
     assert (r.gallery_slot, r.gallery_source, r.admitted, r.gallery_count) == (0, "manual", True, 2)
     assert [src for _, src, _ in g.slots()] == ["manual", "auto"]

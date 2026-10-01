@@ -319,6 +319,7 @@ typedef struct {
     flood_veto_t    last_veto;
     sim_provider_fn provider;
     void           *user;
+    flood_gallery_learner_t *learner;   /* pending learning candidate, like flood_task.c's */
 } sim_device_t;
 
 void *sim_device_new(void)
@@ -327,6 +328,9 @@ void *sim_device_new(void)
     if (!d) return NULL;
     d->gray = malloc((size_t)SIM_FRAME_W * SIM_FRAME_H);
     if (!d->gray) { free(d); return NULL; }
+    d->learner = malloc(sizeof(*d->learner));
+    if (!d->learner) { free(d->gray); free(d); return NULL; }
+    flood_gallery_learner_init(d->learner);
     flood_capture_init(&d->capture);
     return d;
 }
@@ -336,13 +340,14 @@ void sim_device_free(void *dev)
     sim_device_t *d = dev;
     if (!d) return;
     free(d->gray);
+    free(d->learner);
     free(d);
 }
 
 void sim_device_reset(void *dev)
 {
     sim_device_t *d = dev;
-    if (d) flood_capture_init(&d->capture);
+    if (d) { flood_capture_init(&d->capture); flood_gallery_learner_init(d->learner); }
 }
 
 /* flood_grab_fn: attempt N of flood_capture_sample() asks the provider for
@@ -392,6 +397,7 @@ void sim_device_sample(void *dev, void *gallery, sim_provider_fn provider, void 
     if (out->gallery_count == 0) {
         out->outcome = SIM_OUT_SKIPPED_NO_REF;
         out->since_image = d->capture.since_image;
+        out->candidate_pending = d->learner->pending ? 1 : 0;
         return;
     }
 
@@ -429,10 +435,11 @@ void sim_device_sample(void *dev, void *gallery, sim_provider_fn provider, void 
         /* flood_task.c:306-312 -- the gallery bookkeeping after every reading. */
         bool admitted = false, notice = false;
         float notice_corr = 0.0f;
-        flood_gallery_after_sample(g, &sampled, dec.curb_correlation, dec.gallery_index,
+        flood_gallery_after_sample(g, d->learner, &sampled, dec.curb_correlation, dec.gallery_index,
                                    &admitted, &notice, &notice_corr);
         out->admitted = admitted ? 1 : 0;
         out->notice   = notice ? 1 : 0;
     }
     out->gallery_count = sim_gallery_count(g);
+    out->candidate_pending = d->learner->pending ? 1 : 0;
 }
