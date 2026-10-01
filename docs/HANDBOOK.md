@@ -196,7 +196,7 @@ to the window.
 
    Every frame you visit is now scored, and the verdict panel shows the result. Adding another
    reference (say, a dusk frame) **adds** it to the gallery rather than replacing the first. The
-   *Gallery* line lists what is in it; **Reference ▸ Clear all references** empties it.
+   *Gallery* line lists what is in it; **Reference ▸ Delete reference** removes one (manual ones by name, learned ones by slot), **Reference ▸ Clear learned references** keeps only your manual ones, and **Reference ▸ Clear all references** empties it. Deleting a manual reference also drops a pending learning candidate, as the device does.
    **View ▸ Show reference**, then a reference's entry, shows that manual reference in the main view, with the curb/lane
    overlays, in the grayscale the firmware compares against. Moving to any frame (or **Off**)
    returns to the footage. Learned references are not listed: they keep no image.
@@ -581,7 +581,7 @@ curve now scores every frame against what the device run learned.
 | `dense mode needs --reference or --reference-at` | Give a dry reference. |
 | `… already exists and is not empty; choose another --out` | Runs never overwrite each other. Pick a new folder. |
 | `geometry leaves no usable sampling window` | The lines overlap too little horizontally. Widen them. |
-| `reference gallery is full of manual baselines` | 8 manual references is the firmware's limit. Clear some (GUI: **Reference ▸ Clear all references**). |
+| `reference gallery is full of manual baselines` | 8 manual references is the firmware's limit. Delete one (GUI: **Reference ▸ Delete reference**; device web UI: the gallery list's **Delete** buttons). |
 | No references learned on a short clip | Too few samples at the 60 s period. Use `--period 5` (GUI: the period in **Run ▸ Device run…**). |
 | Frames that look clearly dry are never learned | A manual reference must still score them ≥ 0.55 (the anchor). Strong shadows or night mode can score like a flood against every manual baseline: add a manual reference for that lighting. |
 | `clip names must be record_YYYYMMDD_HHMMSS.<ext>` | Rename the listed files; the start time comes from the name. |
