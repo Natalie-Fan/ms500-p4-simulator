@@ -26,7 +26,7 @@ DEFAULT_NMS = 0.20
 # inference_yolo_traffic.cpp:167 drops motorcycles before tracking, drawing or flood see them.
 DROPPED_CLASSES = {"motorcycle"}
 # COCO name -> flood_class_t. The firmware maps its traffic model's classes the
-# same way in map_traffic_class(), main/ai_process/flood_task.c:103-112.
+# same way in map_traffic_class(), main/ai_process/flood_task.c:117-127.
 COCO_TO_FLOOD = {"person": 1, "car": 2, "truck": 3, "bus": 4, "bicycle": 5, "motorcycle": 6}
 CSV_FIELDS = ["frame_idx", "t_sec", "x0", "y0", "x1", "y1", "conf", "coco_class", "flood_class"]
 

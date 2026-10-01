@@ -457,7 +457,7 @@ void sim_device_sample(void *dev, void *gallery, sim_provider_fn provider, void 
         out->outcome = SIM_OUT_SKIPPED_NO_REF;
         return;
     }
-    /* flood_task.c:300 -- an empty gallery is never sampled: the firmware
+    /* flood_task.c:365 -- an empty gallery is never sampled: the firmware
      * would otherwise read correlation 0 as a flood on every sample. */
     if (out->gallery_count == 0) {
         out->outcome = SIM_OUT_SKIPPED_NO_REF;
@@ -497,7 +497,7 @@ void sim_device_sample(void *dev, void *gallery, sim_provider_fn provider, void 
          * after_sample: admission may evict and overwrite this very slot. */
         flood_estimate_shift(&slot->ref, &sampled, &out->shift_dx, &out->shift_dy);
 
-        /* flood_task.c:306-312 -- the gallery bookkeeping after every reading. */
+        /* flood_task.c:375-377 -- the gallery bookkeeping after every reading. */
         bool admitted = false, notice = false;
         float notice_corr = 0.0f;
         flood_gallery_after_sample(g, d->learning ? d->learner : NULL, &sampled, dec.curb_correlation, dec.gallery_index,

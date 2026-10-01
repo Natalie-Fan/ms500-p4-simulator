@@ -221,7 +221,7 @@ static void test_device(void)
     sim_device_sample(dev, ref, scripted, &clear, &r);
     CHECK(r.outcome == 3 && r.since_image == 0);
 
-    /* Empty gallery: skipped, capture state untouched (flood_task.c:300). */
+    /* Empty gallery: skipped, capture state untouched (flood_task.c:365). */
     void *empty = sim_gallery_new();
     sim_device_sample(dev, empty, scripted, &clear, &r);
     CHECK(r.outcome == SIM_OUT_SKIPPED_NO_REF && r.since_image == 0 && r.frame_idx == -1);

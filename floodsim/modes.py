@@ -81,7 +81,7 @@ def sample_device_at(device, ref, feeder: FrameFeeder, t: float, retry_gap: floa
 
 class UploadWriter:
     """What the camera would send: the frame decimated by FLOOD_ROI_DOWNSCALE with a
-    6-hex sequence label (flood_roi_composite + flood_report_upload, flood_task.c:228).
+    6-hex sequence label (flood_roi_composite + flood_report_upload, flood_task.c:248).
     Encoded by OpenCV and labelled with an OpenCV font, so not byte-identical to the P4."""
 
     def __init__(self, out_dir: Path, downscale: int):
