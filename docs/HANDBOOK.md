@@ -236,10 +236,11 @@ timeline, each clip at its real start time (dates carry across midnight).
 2. Drag a handle. The line follows the mouse; the yellow strip redraws when you let go.
 3. The firmware's own rules are enforced. If you put the lane above the curb, or make the lines
    overlap too little horizontally, you get the firmware's error message and the line snaps back.
-4. After an edit, the reference is **stale**: it was built under the old lines. A yellow banner
-   says so. As on the device, **the old reference keeps being used** until you click
-   **Rebuild reference**. Rebuilding rebuilds the manual references and drops learned ones: no
-   frame is kept for them, here or on the device.
+4. After an edit, the manual references are **rebuilt at once** under the new lines, as the device
+   now does from the baseline frames it keeps on its SD card. Learned references are dropped: no
+   frame is kept for them, here or on the device. Only when nothing can be rebuilt (just learned
+   references left) does a yellow banner appear: the old references keep being used, learning is
+   paused, and adding a reference rebuilds the gallery.
 5. **Geometry ▸ Save…** writes the lines as JSON, in the same shape as the camera's web API. You can
    copy the values to the device, or reuse them with `floodsim run --geometry`.
    **Geometry ▸ Reset to firmware default** undoes all edits.
@@ -277,8 +278,8 @@ never changes it. `run.json` records how many learned references it used.
 A progress bar and **Cancel** appear. When the run finishes, results appear in the plot and the
 *Samples* table. **Double-click a row** to jump to its frame. The status bar reports:
 
-- **reference rebuilt:** the reference was stale, so it was rebuilt first. Batch runs always use a
-  reference matching the current lines, as the command line does.
+- **reference rebuilt:** the reference was stale and could be rebuilt first. Geometry changes
+  rebuild it at once, so this is rare.
 - **N frame(s) had no boxes:** no detector and no cache for those frames. Their veto is missing.
 - **(cancelled):** partial results.
 
@@ -516,8 +517,8 @@ numbers.
 ### Set up the lines for a new camera site
 
 1. `floodsim gui site.avi`, go to a dry frame, click **Add reference**.
-2. Use **Edit curb line** / **Edit lane line** until the yellow strip covers the curb face.
-   Click **Rebuild reference**.
+2. Use **Edit curb line** / **Edit lane line** until the yellow strip covers the curb face. The
+   reference follows the lines automatically.
 3. Scrub through the clip and watch the plot: dry and wet frames should stay above 0.45.
 4. **Geometry ▸ Save…** → `site.json`. Enter the same values in the camera's web UI.
 
