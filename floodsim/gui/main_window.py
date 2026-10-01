@@ -146,7 +146,10 @@ class MainWindow(QMainWindow):
         self._action(m, "Add current frame", self._set_reference)
         self._action(m, "Add image…", self._load_reference_image)
         self._action(m, "Rebuild under current geometry (drops learned)", self._rebuild_reference)
+        self.delete_ref_menu = m.addMenu("Delete reference")
+        self.clear_learned_action = self._action(m, "Clear learned references", self._clear_learned)
         self._action(m, "Clear all references", self._clear_references)
+        self._fill_delete_ref_menu(())
         m = bar.addMenu("&Geometry")
         self._action(m, "Load…", self._load_geometry)
         self._action(m, "Save…", self._save_geometry)
@@ -375,6 +378,7 @@ class MainWindow(QMainWindow):
         self.verdict.show_reference(status)
         self.tools.set_actions_enabled(self._n > 0, status.ready)
         self._fill_show_ref_menu(status.manual_names)
+        self._fill_delete_ref_menu(status.slots)
 
     def _fill_show_ref_menu(self, names) -> None:
         """Off plus one entry per manual reference; drops back to the frame if the shown one is gone."""
@@ -391,6 +395,15 @@ class MainWindow(QMainWindow):
         self.show_ref_menu.setEnabled(bool(names))
         if shown != self._show_ref:
             self._set_show_ref(None)
+
+    def _fill_delete_ref_menu(self, slots) -> None:
+        """One entry per in-use slot; learned ones are named by slot (they keep no image)."""
+        self.delete_ref_menu.clear()
+        for index, source, label in slots:
+            action = self.delete_ref_menu.addAction(label)
+            action.triggered.connect(lambda _=False, i=index, s=source: self._delete_reference(i, s))
+        self.delete_ref_menu.setEnabled(bool(slots))
+        self.clear_learned_action.setEnabled(any(source == "auto" for _, source, _ in slots))
 
     def _set_show_ref(self, index: int | None) -> None:
         self._show_ref = index
@@ -419,6 +432,12 @@ class MainWindow(QMainWindow):
 
     def _clear_references(self) -> None:
         self.worker.submit(self.session.clear_references, self._after_reference)
+
+    def _delete_reference(self, index: int, source: str) -> None:
+        self.worker.submit(lambda: self.session.delete_reference(index, source), self._after_reference)
+
+    def _clear_learned(self) -> None:
+        self.worker.submit(self.session.clear_learned, self._after_reference)
 
     # ------------------------------------------------------------ geometry
     def _apply_geometry(self, g: Geometry) -> None:

@@ -82,6 +82,7 @@ class RefStatus:
     geometry_version: int
     built_under: int | None
     manual_names: tuple[str, ...] = ()   # manual references in order, for View ▸ Show reference
+    slots: tuple[tuple[int, str, str], ...] = ()   # (index, source, label) per in-use slot, for Delete reference
 
 
 class Session:
@@ -99,6 +100,7 @@ class Session:
         # rebuilds a manual-only gallery.
         self.reference = None
         self.manual_refs: list[tuple[np.ndarray, dict]] = []
+        self.manual_slots: list[int] = []   # gallery slot of each manual_refs entry, same order
         self.ref_version: int | None = None
         self.device = core.new_device()
         self.dense_cache: dict[int, ScoreResult] = {}
@@ -205,7 +207,10 @@ class Session:
         gray = self.core.rgb_to_gray(rgb)
         if self.reference is None:
             self.reference = self.core.new_gallery()
+        before = {i for i, src, _ in self.reference.slots() if src == "manual"}
         self.reference.add_manual(gray)
+        self.manual_slots.append(next(i for i, src, _ in self.reference.slots()
+                                      if src == "manual" and i not in before))
         self.manual_refs.append((gray, info))
         self.ref_version = self.geometry_version
         self.dense_cache.clear()
@@ -231,6 +236,7 @@ class Session:
         if not self.manual_refs:
             raise FloodSimError("no reference to rebuild; set one first")
         self.reference = self._manual_gallery()
+        self.manual_slots = list(range(len(self.manual_refs)))   # an empty gallery fills slots in order
         self.device.reset()      # a pending learning candidate belongs to the old gallery
         self.ref_version = self.geometry_version
         self.dense_cache.clear()
@@ -240,7 +246,30 @@ class Session:
         self.reference = None
         self.device.reset()      # a pending learning candidate belongs to the old gallery
         self.manual_refs.clear()
+        self.manual_slots.clear()
         self.ref_version = None
+        self.dense_cache.clear()
+        return self.ref_status()
+
+    def delete_reference(self, index: int, source: str) -> RefStatus:
+        """Delete one gallery slot, as the device's web UI does. A manual one also leaves the
+        baselines that runs and rebuilds start from, and drops a pending learning candidate
+        (it was anchored against the manual references)."""
+        if self.reference is None or not self.reference.delete_slot(index, source):
+            raise FloodSimError(f"no {source} reference in slot {index}")
+        if source == "manual":
+            pos = self.manual_slots.index(index)
+            del self.manual_slots[pos]
+            del self.manual_refs[pos]
+            self.device.forget_candidate()
+        self.dense_cache.clear()
+        return self.ref_status()
+
+    def clear_learned(self) -> RefStatus:
+        """Free every learned slot and drop the pending learning candidate, as the device does."""
+        if self.reference is not None:
+            self.reference.clear_auto()
+        self.device.forget_candidate()
         self.dense_cache.clear()
         return self.ref_status()
 
@@ -261,8 +290,11 @@ class Session:
         lines = [f"{len(slots)} reference(s): {len(slots) - learned} manual, {learned} learned"]
         names = tuple(self._describe(info) for _, info in self.manual_refs)
         lines += [f"  manual: {name}" for name in names]
+        labels = dict(zip(self.manual_slots, names))
+        listed = tuple((i, source, labels.get(i, f"manual, slot {i}") if source == "manual"
+                        else f"learned, slot {i}") for i, source, _ in slots)
         return RefStatus(True, self.ref_version != self.geometry_version, "\n".join(lines),
-                         self.geometry_version, self.ref_version, names)
+                         self.geometry_version, self.ref_version, names, listed)
 
     def reference_view(self, index: int) -> np.ndarray:
         """Manual reference `index` as RGB, in the gray the firmware stores and compares."""
@@ -353,6 +385,7 @@ class Session:
             out = run_device(self.core, src, self.boxes, gallery, params, progress=progress, cancel=cancel)
             if gallery is not None:
                 self.reference = gallery
+                self.manual_slots = list(range(len(self.manual_refs)))   # built by _manual_gallery(); runs never move manual slots
                 self.device.reset()      # the session's pending candidate belongs to the old gallery
                 self.dense_cache.clear()
                 adopted = True

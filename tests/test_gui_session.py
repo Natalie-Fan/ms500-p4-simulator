@@ -349,3 +349,47 @@ def test_replacing_the_gallery_drops_a_pending_candidate(core, build_info, tmp_p
     s.run_batch(RunParams(mode="device", period=60.0))    # adopting the run's gallery: same rule
     row = s.sample(1)
     assert not row["admitted"] and row["candidate_pending"]
+
+
+def test_delete_references_and_clear_learned(core, build_info, tmp_path):
+    clip = write_frame_folder(tmp_path / "lit", [(0, dry_gray()), (60000, dusk_gray()),
+                                                 (120000, dry_gray())])
+    s = Session(core, build_info)
+    s.open(clip, no_detector=True)
+    s.set_reference_frame(0)
+    s.sample(1)
+    s.sample(1)                                                 # dusk proven: learned in slot 1
+    s.set_reference_frame(2)                                    # second (dry) manual: free slot 2
+    assert s.ref_status().slots == ((0, "manual", "frame 0 (0.00 s)"), (1, "auto", "learned, slot 1"),
+                                    (2, "manual", "frame 2 (120.00 s)"))
+    with pytest.raises(FloodSimError, match="no manual reference in slot 1"):
+        s.delete_reference(1, "manual")                         # stale request: wrong source
+    s.delete_reference(1, "auto")
+    assert "2 reference(s): 2 manual, 0 learned" in s.ref_status().description
+
+    assert s.sample(1)["candidate_pending"]                     # a new dusk candidate...
+    s.delete_reference(0, "manual")                             # ...dropped with its anchor
+    row = s.sample(1)                                           # without the drop: promoted here
+    assert not row["admitted"] and row["candidate_pending"]
+    assert s.ref_status().manual_names == ("frame 2 (120.00 s)",)
+    s.rebuild_reference()                                       # the deleted baseline stays gone
+    assert s.ref_status().slots == ((0, "manual", "frame 2 (120.00 s)"),)
+    s.delete_reference(0, "manual")
+    assert not s.ref_status().ready
+    assert s.sample(1)["outcome"] == "skipped_no_ref"
+
+
+def test_clear_learned_keeps_manual_and_drops_the_candidate(core, build_info, tmp_path):
+    clip = write_frame_folder(tmp_path / "lit", [(0, dry_gray()), (60000, dusk_gray())])
+    s = Session(core, build_info)
+    s.open(clip, no_detector=True)
+    s.set_reference_frame(0)
+    assert s.sample(1)["candidate_pending"]
+    s.clear_learned()                                           # nothing learned yet; candidate dropped
+    row = s.sample(1)
+    assert not row["admitted"] and row["candidate_pending"]
+    assert s.sample(1)["admitted"]
+    assert "1 manual, 1 learned" in s.ref_status().description
+    s.clear_learned()
+    assert "1 reference(s): 1 manual, 0 learned" in s.ref_status().description
+    assert s.ref_status().slots == ((0, "manual", "frame 0 (0.00 s)"),)

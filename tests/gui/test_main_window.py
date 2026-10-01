@@ -241,3 +241,16 @@ def test_open_folder_of_clips_shows_clock_time(qtbot, tmp_path, window):
     assert window.statusBar().currentMessage() == "2 clips, 16:00–16:10, 4 frames"
     assert window.timeline.time_label.text().startswith("16:00:00 · record_20260618_160000.avi")
     assert window.verdict._start is not None
+
+
+def test_delete_reference_menu(qtbot, tmp_path, window):
+    folder = write_frame_folder(tmp_path / "clip", [(0, dry_gray()), (60000, dusk_gray())])
+    _open(qtbot, window, folder)
+    assert not window.delete_ref_menu.isEnabled() and not window.clear_learned_action.isEnabled()
+    _set_reference(qtbot, window)
+    qtbot.waitUntil(lambda: window.delete_ref_menu.isEnabled(), timeout=T)
+    assert [a.text() for a in window.delete_ref_menu.actions()] == ["frame 0 (0.00 s)"]
+    assert not window.clear_learned_action.isEnabled()
+    window.delete_ref_menu.actions()[0].trigger()
+    qtbot.waitUntil(lambda: window.verdict.reference_label.text().startswith("none"), timeout=T)
+    assert not window.delete_ref_menu.isEnabled()
