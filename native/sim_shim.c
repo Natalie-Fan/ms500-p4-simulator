@@ -231,6 +231,17 @@ int32_t sim_gallery_slot(const void *gallery, int32_t index, int32_t *source,
     return 1;
 }
 
+int32_t sim_gallery_delete_slot(void *gallery, int32_t index, int32_t source)
+{
+    return flood_gallery_delete_slot((flood_gallery_t *)gallery, index,
+                                     (flood_ref_source_t)source) ? 1 : 0;
+}
+
+int32_t sim_gallery_clear_auto(void *gallery)
+{
+    return flood_gallery_clear_auto((flood_gallery_t *)gallery);
+}
+
 float sim_correlation_at(const void *gallery, int32_t slot, const uint8_t *gray,
                          int32_t dx, int32_t dy)
 {
@@ -348,6 +359,12 @@ void sim_device_reset(void *dev)
 {
     sim_device_t *d = dev;
     if (d) { flood_capture_init(&d->capture); flood_gallery_learner_init(d->learner); }
+}
+
+void sim_device_forget_candidate(void *dev)
+{
+    sim_device_t *d = dev;
+    if (d) flood_gallery_learner_init(d->learner);
 }
 
 /* flood_grab_fn: attempt N of flood_capture_sample() asks the provider for

@@ -224,6 +224,8 @@ class Core:
         fn("sim_gallery_count", c_int32, c_void_p)
         fn("sim_gallery_add_manual", c_int32, c_void_p, _U8P)
         fn("sim_gallery_slot", c_int32, c_void_p, c_int32, POINTER(c_int32), POINTER(c_uint32))
+        fn("sim_gallery_delete_slot", c_int32, c_void_p, c_int32, c_int32)
+        fn("sim_gallery_clear_auto", c_int32, c_void_p)
         fn("sim_correlation_at", c_float, c_void_p, c_int32, _U8P, c_int32, c_int32)
         fn("sim_box_from_accelerator", None, c_float, c_float, c_float, c_float, c_float,
            c_int32, c_int32, c_int32, POINTER(_SimBox))
@@ -232,6 +234,7 @@ class Core:
         fn("sim_device_new", c_void_p)
         fn("sim_device_free", None, c_void_p)
         fn("sim_device_reset", None, c_void_p)
+        fn("sim_device_forget_candidate", None, c_void_p)
         fn("sim_device_sample", None, c_void_p, c_void_p, _PROVIDER_FN, c_void_p, POINTER(_SimResult))
 
     # names and constants
@@ -360,6 +363,14 @@ class Gallery:
         self._core._lib.sim_gallery_clear(self.ptr)
         self.geometry = None
 
+    def delete_slot(self, index: int, source: str) -> bool:
+        """flood_gallery_delete_slot(): frees slot `index` only if it holds a `source` reference."""
+        return bool(self._core._lib.sim_gallery_delete_slot(self.ptr, index, SOURCE_NAMES.index(source)))
+
+    def clear_auto(self) -> int:
+        """flood_gallery_clear_auto(): frees every learned slot; returns how many."""
+        return self._core._lib.sim_gallery_clear_auto(self.ptr)
+
     @property
     def count(self) -> int:
         return self._core._lib.sim_gallery_count(self.ptr) if self.ptr else 0
@@ -401,6 +412,10 @@ class Device:
 
     def reset(self) -> None:
         self._core._lib.sim_device_reset(self._ptr)
+
+    def forget_candidate(self) -> None:
+        """Drop a pending learning candidate, keeping the capture state (heartbeat counter)."""
+        self._core._lib.sim_device_forget_candidate(self._ptr)
 
     def sample(self, ref: Gallery | None, provider: Provider) -> DeviceResult:
         """One firmware sampling cycle; may admit an AUTO reference into `ref`."""

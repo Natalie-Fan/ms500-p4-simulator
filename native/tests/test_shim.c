@@ -459,6 +459,65 @@ static void test_full_manual_gallery_drops_proven_candidate(void)
     sim_gallery_free(g);
 }
 
+/* Deleting references: the source must match, a freed slot is reused, clear_auto keeps every
+ * MANUAL slot, and an emptied gallery is not sampled. */
+static void test_gallery_delete(void)
+{
+    void *g = sim_gallery_new();
+    void *dev = sim_device_new();
+    sim_result_t r;
+    int32_t source = -1;
+    sim_gallery_add_manual(g, g_dry);                           /* slot 0, MANUAL */
+    script_t relit = { { g_relit, g_relit }, { 0, 0 }, { 0, 1 }, 0 };
+    sim_device_sample(dev, g, scripted, &relit, &r);
+    sim_device_sample(dev, g, scripted, &relit, &r);            /* proven: slot 1, AUTO */
+    CHECK(r.admitted && sim_gallery_count(g) == 2);
+
+    CHECK(sim_gallery_delete_slot(g, 1, 0) == 0);               /* AUTO slot, MANUAL request */
+    CHECK(sim_gallery_delete_slot(g, 0, 1) == 0);               /* MANUAL slot, AUTO request */
+    CHECK(sim_gallery_delete_slot(g, 5, 0) == 0);               /* unused */
+    CHECK(sim_gallery_delete_slot(g, -1, 0) == 0 && sim_gallery_delete_slot(g, 8, 0) == 0);
+    CHECK(sim_gallery_delete_slot(NULL, 0, 0) == 0 && sim_gallery_clear_auto(NULL) == 0);
+    CHECK(sim_gallery_count(g) == 2);
+
+    CHECK(sim_gallery_delete_slot(g, 0, 0) == 1);               /* the manual one */
+    CHECK(sim_gallery_count(g) == 1 && sim_gallery_slot(g, 0, NULL, NULL) == 0);
+    CHECK(sim_gallery_add_manual(g, g_dry) == 1);               /* reuses the freed slot 0 */
+    CHECK(sim_gallery_slot(g, 0, &source, NULL) == 1 && source == 0);
+
+    sim_gallery_add_manual(g, g_flood);                         /* slot 2, MANUAL */
+    CHECK(sim_gallery_clear_auto(g) == 1);
+    CHECK(sim_gallery_count(g) == 2 && sim_gallery_slot(g, 1, NULL, NULL) == 0);
+    CHECK(sim_gallery_clear_auto(g) == 0);
+
+    CHECK(sim_gallery_delete_slot(g, 0, 0) == 1 && sim_gallery_delete_slot(g, 2, 0) == 1);
+    CHECK(sim_gallery_count(g) == 0);
+    sim_device_sample(dev, g, scripted, &relit, &r);            /* empty: skipped, not a flood */
+    CHECK(r.outcome == SIM_OUT_SKIPPED_NO_REF && !r.has_reading);
+
+    sim_device_free(dev);
+    sim_gallery_free(g);
+}
+
+/* forget_candidate drops a pending candidate: the next reading forms a new one instead of
+ * promoting the old. */
+static void test_forget_candidate(void)
+{
+    void *g = sim_gallery_new();
+    void *dev = sim_device_new();
+    sim_result_t r;
+    sim_gallery_add_manual(g, g_dry);
+    script_t relit = { { g_relit, g_relit }, { 0, 0 }, { 0, 1 }, 0 };
+    sim_device_sample(dev, g, scripted, &relit, &r);
+    CHECK(r.candidate_pending);
+    sim_device_forget_candidate(dev);
+    sim_device_forget_candidate(NULL);
+    sim_device_sample(dev, g, scripted, &relit, &r);
+    CHECK(!r.admitted && r.candidate_pending && sim_gallery_count(g) == 1);
+    sim_device_free(dev);
+    sim_gallery_free(g);
+}
+
 static void test_band_coverage(void)
 {
     const sim_box_t road = { 0.0f, 900.0f, 1919.0f, 1079.0f, 0.9f, 2 };  /* below the lane line */
@@ -495,6 +554,8 @@ int main(void)
     test_candidate_survives_blocked_sample();
     test_candidate_not_promoted_when_already_covered();
     test_full_manual_gallery_drops_proven_candidate();
+    test_gallery_delete();
+    test_forget_candidate();
     test_band_coverage();
 
     free(g_dry);

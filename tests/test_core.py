@@ -215,3 +215,29 @@ def test_build_error_message_hints_locked_dll():
     msg = build_error_message(["cmake", "--build", "x"], "", "ld: cannot open output file flood_core.dll: Permission denied")
     assert "Permission denied" in msg
     assert "close other floodsim" in msg
+
+
+def test_gallery_delete_slot_and_clear_auto(core):
+    g = core.new_gallery()
+    g.add_manual(dry_gray())
+    dev = core.new_device()
+    dusk = _provider([(dusk_gray(), [], 7)] * 2)
+    dev.sample(g, dusk)
+    dev.sample(g, dusk)                                      # proven: learned in slot 1
+    assert [(i, src) for i, src, _ in g.slots()] == [(0, "manual"), (1, "auto")]
+    assert not g.delete_slot(1, "manual") and not g.delete_slot(5, "auto")
+    assert g.clear_auto() == 1 and g.clear_auto() == 0
+    assert [(i, src) for i, src, _ in g.slots()] == [(0, "manual")]
+    assert g.delete_slot(0, "manual") and g.count == 0
+    assert dev.sample(g, dusk).outcome == "skipped_no_ref"
+
+
+def test_device_forget_candidate(core):
+    g = core.new_gallery()
+    g.add_manual(dry_gray())
+    dev = core.new_device()
+    dusk = _provider([(dusk_gray(), [], 7)] * 2)
+    assert dev.sample(g, dusk).candidate_pending
+    dev.forget_candidate()
+    r = dev.sample(g, dusk)
+    assert (r.admitted, r.candidate_pending, r.gallery_count) == (False, True, 1)

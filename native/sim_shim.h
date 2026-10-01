@@ -106,6 +106,11 @@ SIM_API int32_t sim_gallery_add_manual(void *gallery, const uint8_t *gray);
  * the cycle it last matched; 0 if unused or out of range. */
 SIM_API int32_t sim_gallery_slot(const void *gallery, int32_t index, int32_t *source,
                                  uint32_t *last_matched_cycle);
+/* flood_gallery_delete_slot(): 1 if slot `index` held a `source` (flood_ref_source_t)
+ * reference and is now free; 0 if unused, out of range or another source. */
+SIM_API int32_t sim_gallery_delete_slot(void *gallery, int32_t index, int32_t source);
+/* flood_gallery_clear_auto(): frees every learned slot; returns how many. */
+SIM_API int32_t sim_gallery_clear_auto(void *gallery);
 SIM_API float   sim_correlation_at(const void *gallery, int32_t slot, const uint8_t *gray,
                                    int32_t dx, int32_t dy);
 SIM_API void    sim_box_from_accelerator(float x0, float y0, float x1, float y1, float confidence,
@@ -121,6 +126,9 @@ SIM_API int32_t sim_heartbeat_every(void);
 SIM_API void *sim_device_new(void);
 SIM_API void  sim_device_free(void *dev);
 SIM_API void  sim_device_reset(void *dev);
+/* Drops a pending learning candidate only (flood_task.c does this when learned or manual
+ * references are deleted); the capture state is kept. */
+SIM_API void  sim_device_forget_candidate(void *dev);
 /* One firmware sampling cycle; may admit an AUTO reference into `gallery`. */
 SIM_API void  sim_device_sample(void *dev, void *gallery, sim_provider_fn provider,
                                 void *user, sim_result_t *out);
