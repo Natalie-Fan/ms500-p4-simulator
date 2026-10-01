@@ -334,3 +334,18 @@ def test_session_opens_folder_of_clips(core, build_info, tmp_path):
     assert not (tmp_path / "day.boxes.edited.csv").exists() and not (tmp_path / "day.boxes.csv").exists()
     out = Path(s.export_run(tmp_path / "exp"))
     assert "checks skipped (no footage): 18" in (out / "summary.txt").read_text()
+
+
+def test_replacing_the_gallery_drops_a_pending_candidate(core, build_info, tmp_path):
+    clip = write_frame_folder(tmp_path / "lit", [(0, dry_gray()), (60000, dusk_gray())])
+    s = Session(core, build_info)
+    s.open(clip, no_detector=True)
+    s.set_reference_frame(0)
+    assert s.sample(1)["candidate_pending"]
+    s.clear_references()                       # a candidate from before the clear never promotes
+    s.set_reference_frame(0)
+    row = s.sample(1)
+    assert not row["admitted"] and row["candidate_pending"]
+    s.run_batch(RunParams(mode="device", period=60.0))    # adopting the run's gallery: same rule
+    row = s.sample(1)
+    assert not row["admitted"] and row["candidate_pending"]

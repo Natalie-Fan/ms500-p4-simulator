@@ -231,12 +231,14 @@ class Session:
         if not self.manual_refs:
             raise FloodSimError("no reference to rebuild; set one first")
         self.reference = self._manual_gallery()
+        self.device.reset()      # a pending learning candidate belongs to the old gallery
         self.ref_version = self.geometry_version
         self.dense_cache.clear()
         return self.ref_status()
 
     def clear_references(self) -> RefStatus:
         self.reference = None
+        self.device.reset()      # a pending learning candidate belongs to the old gallery
         self.manual_refs.clear()
         self.ref_version = None
         self.dense_cache.clear()
@@ -351,6 +353,7 @@ class Session:
             out = run_device(self.core, src, self.boxes, gallery, params, progress=progress, cancel=cancel)
             if gallery is not None:
                 self.reference = gallery
+                self.device.reset()      # the session's pending candidate belongs to the old gallery
                 self.dense_cache.clear()
                 adopted = True
         self._label_rows(out.rows)
