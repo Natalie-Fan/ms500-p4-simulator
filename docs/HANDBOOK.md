@@ -83,7 +83,7 @@ ignores changes in brightness and contrast.
 | Term | Meaning |
 |---|---|
 | **Dry reference** | A frame of the same scene when it was dry. On the device it is captured by "Capture Baseline". |
-| **Reference gallery** | Up to 8 dry references, so a frame is compared against whichever one matches the current lighting (day, dusk, night…). Every frame is scored against all of them and the best match counts. **Manual** references are the ones you add; the device adds **learned** (auto) ones itself when a sample is confidently dry (0.65 ≤ correlation < 0.95) but not yet well covered, **and** at least one manual reference still scores it ≥ 0.55 (so learning cannot follow a slowly rising flood). After 5 samples in a row between 0.45 and 0.65, it logs a *no confident match* notice: time to capture a baseline for that lighting. |
+| **Reference gallery** | Up to 8 dry references, so a frame is compared against whichever one matches the current lighting (day, dusk, night…). Every frame is scored against all of them and the best match counts. **Manual** references are the ones you add; the device adds **learned** (auto) ones itself when a sample is confidently dry (0.65 ≤ correlation < 0.95) but not yet well covered, **and** at least one manual reference still scores it ≥ 0.55 (so learning cannot follow a slowly rising flood). A learned reference is first a *candidate*; it is kept only if the next reading still matches it (≥ 0.95), so flowing water and rain streaks, which never repeat, are not learned. After 5 samples in a row between 0.45 and 0.65, it logs a *no confident match* notice: time to capture a baseline for that lighting. |
 | **Geometry** | Two lines you place on the image: the **curb line** (the curb's foot) and the **lane line** (below it, on the road). The sampled **kerb strip** is derived from them. |
 | **Correlation** | −1 … 1. It measures how much the curb strip still looks like the dry reference. **Below 0.45 = submerged.** |
 | **Severity** | From correlation: `none` ≥ 0.45 > `minor` ≥ 0.05 > `moderate` ≥ −0.10 > `severe`. |
@@ -225,7 +225,7 @@ timeline, each clip at its real start time (dates carry across midnight).
 
 | Button | What it does |
 |---|---|
-| **Sample** | A full device sample at the current frame. If it is obstructed, it retries on the frame 1 s later. It advances the heartbeat counter, adds a row to *Samples*, and **can learn a reference**, as the device does. *Matched* in the verdict panel shows which slot matched and whether a reference was learned or a *no confident match* notice fired. |
+| **Sample** | A full device sample at the current frame. If it is obstructed, it retries on the frame 1 s later. It advances the heartbeat counter, adds a row to *Samples*, and **can learn a reference**, as the device does. Learning takes two samples: the first makes a candidate, the second confirms it (the verdict says *candidate pending*). *Matched* in the verdict panel shows which slot matched and whether a reference was learned or a *no confident match* notice fired. |
 | **Score** | Stage 1 (veto) + Stage 2 (curb check) on this frame only, against the whole gallery. The device state is untouched and nothing is learned. |
 | **Add reference** | Adds this frame to the gallery as a manual reference (the device's Capture Baseline). |
 | **Reset state** | Sets the heartbeat counter ("since image") back to 0 and **forgets learned references**; manual ones stay. |
@@ -410,7 +410,8 @@ PGM frames and does no video decoding and no detection. Keep its paths ASCII.
 
 **`samples.csv`, device mode:** `sample, t_sec, frame_idx, outcome, frames_taken, has_reading,
 curb_correlation, severity, shift_dx, shift_dy, veto_usable, veto_coverage, veto_worst_class,
-since_image, gallery_slot, gallery_source, admitted, notice, gallery_count` (+ `label`).
+since_image, gallery_slot, gallery_source, admitted, notice, gallery_count, candidate_pending`
+(+ `label`).
 
 - `t_sec` is the sample time.
 - `frame_idx` is the frame actually used; −1 means no frame was available.
@@ -419,6 +420,7 @@ since_image, gallery_slot, gallery_source, admitted, notice, gallery_count` (+ `
   `none` without a reading.
 - `admitted` is true when this sample learned a new reference; `notice` when it raised the
   *no confident match* notice; `gallery_count` is the gallery size after the sample.
+  `candidate_pending` is true while a candidate awaits its confirming reading.
 
 **`samples.csv`, dense mode:** `frame_idx, t_sec, veto_usable, veto_coverage, veto_worst_class,
 curb_correlation, submerged, severity, shift_dx, shift_dy, gallery_slot` (+ `label`).
