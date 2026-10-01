@@ -145,7 +145,6 @@ class MainWindow(QMainWindow):
         m = bar.addMenu("&Reference")
         self._action(m, "Add current frame", self._set_reference)
         self._action(m, "Add image…", self._load_reference_image)
-        self._action(m, "Rebuild under current geometry (drops learned)", self._rebuild_reference)
         self.delete_ref_menu = m.addMenu("Delete reference")
         self.clear_learned_action = self._action(m, "Clear learned references", self._clear_learned)
         self._action(m, "Clear all references", self._clear_references)
@@ -196,7 +195,6 @@ class MainWindow(QMainWindow):
         self.tools.scoreClicked.connect(self._score)
         self.tools.setReferenceClicked.connect(self._set_reference)
         self.tools.resetStateClicked.connect(self._reset_state)
-        self.verdict.rebuildClicked.connect(self._rebuild_reference)
         self.frame_view.geometryEdited.connect(self._on_geometry_edited)
         self.frame_view.boxDrawn.connect(self._on_box_drawn)
         self.frame_view.boxDeleteRequested.connect(self._on_box_delete)
@@ -426,9 +424,6 @@ class MainWindow(QMainWindow):
         path, _ = QFileDialog.getOpenFileName(self, "Dry reference image", "", IMAGE_FILTER)
         if path:
             self.worker.submit(lambda: self.session.set_reference_image(Path(path)), self._after_reference)
-
-    def _rebuild_reference(self) -> None:
-        self.worker.submit(self.session.rebuild_reference, self._after_reference)
 
     def _clear_references(self) -> None:
         self.worker.submit(self.session.clear_references, self._after_reference)

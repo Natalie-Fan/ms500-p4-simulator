@@ -79,7 +79,6 @@ def _veto(usable: bool, coverage: float, worst: str) -> str:
 
 
 class VerdictPanel(QWidget):
-    rebuildClicked = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -120,10 +119,7 @@ class VerdictPanel(QWidget):
         banner = QVBoxLayout(self.stale_banner)
         self.stale_text = QLabel()
         self.stale_text.setWordWrap(True)
-        self.rebuild_btn = QPushButton("Rebuild reference")
-        self.rebuild_btn.clicked.connect(self.rebuildClicked)
         banner.addWidget(self.stale_text)
-        banner.addWidget(self.rebuild_btn)
         self.stale_banner.hide()
         layout.addWidget(self.stale_banner)
         layout.addStretch(1)
@@ -187,9 +183,9 @@ class VerdictPanel(QWidget):
         self.stale_banner.setVisible(status.stale)
         if status.stale:
             self.stale_text.setText(
-                f"Reference was built under geometry v{status.built_under}; current is "
-                f"v{status.geometry_version}. Scores still use the old reference, as the device "
-                f"would until it recalibrates.")
+                f"Lines moved (references built under geometry v{status.built_under}, now "
+                f"v{status.geometry_version}) and there are no saved baseline frames to rebuild "
+                f"from. Capture a new baseline; learning is paused until then.")
 
     def show_firmware(self, fw: dict) -> None:
         commit = (fw.get("commit") or "unknown")[:7]

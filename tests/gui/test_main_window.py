@@ -34,7 +34,7 @@ def _set_reference(qtbot, win):
     qtbot.waitUntil(lambda: "manual: frame" in win.verdict.reference_label.text(), timeout=T)
 
 
-def test_smoke_open_reference_score_edit_stale(qtbot, tmp_path, window):
+def test_smoke_open_reference_score_edit_rebuilds(qtbot, tmp_path, window):
     img = tmp_path / "dry.png"
     write_image(img, to_rgb(dry_gray()))
     _open(qtbot, window, img)
@@ -46,8 +46,8 @@ def test_smoke_open_reference_score_edit_stale(qtbot, tmp_path, window):
     fv._press(QPointF(560, 230))
     fv._move(QPointF(560, 250))
     fv._release(QPointF(560, 250))
-    qtbot.waitUntil(lambda: not window.verdict.stale_banner.isHidden(), timeout=T)
-    assert window.last_error is None
+    qtbot.waitUntil(lambda: window.session.ref_status().built_under == 1, timeout=T)
+    assert window.verdict.stale_banner.isHidden() and window.last_error is None
 
 
 def test_manual_sample_adds_row_and_marker(qtbot, tmp_path, window):
@@ -254,3 +254,9 @@ def test_delete_reference_menu(qtbot, tmp_path, window):
     window.delete_ref_menu.actions()[0].trigger()
     qtbot.waitUntil(lambda: window.verdict.reference_label.text().startswith("none"), timeout=T)
     assert not window.delete_ref_menu.isEnabled()
+
+
+def test_reference_menu_has_no_rebuild_entry(window):
+    ref_menu = next(a.menu() for a in window.menuBar().actions() if a.text() == "&Reference")
+    assert not any("Rebuild" in a.text() for a in ref_menu.actions())
+    assert not hasattr(window.verdict, "rebuild_btn")

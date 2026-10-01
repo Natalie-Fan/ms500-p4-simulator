@@ -49,15 +49,14 @@ def test_reference_then_scores(session):
     assert session.score_frame(2).severity == "moderate"
 
 
-def test_geometry_change_marks_reference_stale_and_rebuild_clears(session):
+def test_geometry_change_rebuilds_the_reference(session):
     session.set_reference_frame(0)
     g = session.geometry.to_list()
     g[1] = 240.0
     ov = session.set_geometry(Geometry.from_list(g))
     assert ov["geometry"][1] == 240.0
     st = session.ref_status()
-    assert st.stale and (st.built_under, st.geometry_version) == (0, 1)
-    assert not session.rebuild_reference().stale
+    assert not st.stale and (st.built_under, st.geometry_version) == (1, 1)
 
 
 def test_invalid_geometry_rejected(session):
@@ -148,25 +147,22 @@ def _stale_geometry(session):
     session.set_geometry(Geometry.from_list(g))
 
 
-def test_batch_run_rebuilds_stale_reference(core, build_info, folder, session, tmp_path):
-    # A flooded reference, then a curb moved above the flooded band: the stale
-    # reference still holds the flat (flooded) strip, a rebuilt one the dry rows.
+def test_geometry_change_rebuilds_before_runs(core, build_info, folder, session, tmp_path):
+    # A flooded reference, then a curb moved above the flooded band: the reference is rebuilt
+    # at once, exactly as one captured under the moved lines, so the run needs no rebuild.
     moved = Geometry.from_list([560.0, 100.0, 1920.0, 150.0, 560.0, 160.0, 1920.0, 190.0])
     session.set_reference_frame(2)
     session.set_geometry(moved)
-    assert session.ref_status().stale
+    assert not session.ref_status().stale
     res = session.run_batch(RunParams(mode="dense"))
     fresh = Session(core, build_info)
     fresh.open(folder, no_detector=True)
-    fresh.set_reference_frame(2)
     fresh.set_geometry(moved)
-    fresh.rebuild_reference()
-    explicit = fresh.run_batch(RunParams(mode="dense"))
-    assert res["rows"] == explicit["rows"]
-    assert res["reference_rebuilt"] is True and explicit["reference_rebuilt"] is False
-    assert not session.ref_status().stale
+    fresh.set_reference_frame(2)
+    assert res["rows"] == fresh.run_batch(RunParams(mode="dense"))["rows"]
+    assert res["reference_rebuilt"] is False
     out = Path(session.export_run(tmp_path / "run"))
-    assert json.loads((out / "run.json").read_text())["reference"]["rebuilt_for_run"] is True
+    assert json.loads((out / "run.json").read_text())["reference"]["rebuilt_for_run"] is False
 
 
 def test_export_describes_the_run_not_the_current_state(session, tmp_path):
@@ -373,8 +369,8 @@ def test_delete_references_and_clear_learned(core, build_info, tmp_path):
     assert not row["admitted"] and row["candidate_pending"]
     assert s.ref_status().manual_names == ("frame 2 (120.00 s)",)
     s.rebuild_reference()                                       # the deleted baseline stays gone
-    assert s.ref_status().slots == ((0, "manual", "frame 2 (120.00 s)"),)
-    s.delete_reference(0, "manual")
+    assert s.ref_status().slots == ((2, "manual", "frame 2 (120.00 s)"),)   # rebuilt in place
+    s.delete_reference(2, "manual")
     assert not s.ref_status().ready
     assert s.sample(1)["outcome"] == "skipped_no_ref"
 
@@ -395,7 +391,7 @@ def test_clear_learned_keeps_manual_and_drops_the_candidate(core, build_info, tm
     assert s.ref_status().slots == ((0, "manual", "frame 0 (0.00 s)"),)
 
 
-def test_only_learned_references_left_after_deleting_the_last_manual(core, build_info, tmp_path):
+def test_only_learned_references_left_stay_stale_until_a_new_baseline(core, build_info, tmp_path):
     clip = write_frame_folder(tmp_path / "lit", [(0, dry_gray()), (60000, dusk_gray())])
     s = Session(core, build_info)
     s.open(clip, no_detector=True)
@@ -403,16 +399,17 @@ def test_only_learned_references_left_after_deleting_the_last_manual(core, build
     s.sample(1)
     s.sample(1)                                                 # learned in slot 1
     s.delete_reference(0, "manual")
-    assert "1 reference(s): 0 manual, 1 learned" in s.ref_status().description   # as on the device
-    _stale_geometry(s)
-    with pytest.raises(FloodSimError, match="dense runs need a dry reference"):
-        s.run_batch(RunParams(mode="dense"))                    # rebuilding drops the learned ones
-    assert not s.ref_status().ready
-    assert s.run_batch(RunParams(mode="device", period=60.0))["rows"][0]["outcome"] == "skipped_no_ref"
-
-    s.set_reference_frame(0)
+    assert "1 reference(s): 0 manual, 1 learned" in s.ref_status().description
+    _stale_geometry(s)                                          # nothing to rebuild from: kept, stale
+    st = s.ref_status()
+    assert st.ready and st.stale and st.slots == ((1, "auto", "learned, slot 1"),)
+    res = s.run_batch(RunParams(mode="dense"))                  # runs score the stale gallery
+    assert res["reference_rebuilt"] is False and len(res["rows"]) == 2
+    s.set_reference_frame(0)                                    # a new baseline rebuilds: current again
+    st = s.ref_status()
+    assert not st.stale and st.slots == ((0, "manual", "frame 0 (0.00 s)"),)
     s.sample(1)
-    s.sample(1)
+    assert s.sample(1)["admitted"]                              # learning is back
     s.delete_reference(0, "manual")
-    s.reset_device()                                            # forgets learned references
+    s.reset_device()                                            # sim-only: forgets learned references
     assert not s.ref_status().ready

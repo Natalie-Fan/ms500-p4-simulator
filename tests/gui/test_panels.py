@@ -44,6 +44,7 @@ def test_stale_banner(qtbot):
     qtbot.addWidget(p)
     p.show_reference(RefStatus(True, True, "frame 0 (0.00 s)", 2, 1))
     assert not p.stale_banner.isHidden() and "v1" in p.stale_text.text()
+    assert "Capture a new baseline" in p.stale_text.text()
     p.show_reference(RefStatus(True, False, "frame 0 (0.00 s)", 2, 2))
     assert p.stale_banner.isHidden()
     p.show_reference(RefStatus(False, False, "none", 0, None))

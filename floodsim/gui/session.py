@@ -204,6 +204,7 @@ class Session:
     def _build_reference(self, rgb: np.ndarray, info: dict) -> RefStatus:
         # As Capture Baseline on the device: added to the live gallery, learned
         # references kept.
+        was_stale = self.ref_status().stale
         gray = self.core.rgb_to_gray(rgb)
         if self.reference is None:
             self.reference = self.core.new_gallery()
@@ -212,7 +213,10 @@ class Session:
         self.manual_slots.append(next(i for i, src, _ in self.reference.slots()
                                       if src == "manual" and i not in before))
         self.manual_refs.append((gray, info))
-        self.ref_version = self.geometry_version
+        if was_stale:
+            self.rebuild_reference()          # as the device: a capture into a stale gallery rebuilds
+        else:
+            self.ref_version = self.geometry_version
         self.dense_cache.clear()
         return self.ref_status()
 
@@ -231,15 +235,16 @@ class Session:
         return self._build_reference(rgb, {"kind": "image", "path": str(path)})
 
     def rebuild_reference(self) -> RefStatus:
-        """Rebuild the manual baselines under the current geometry; learned ones are
-        dropped (neither the device nor the simulator keeps their frames)."""
-        if not self.manual_refs:
+        """Rebuild the manual references from their frames under the current geometry through
+        the firmware rule (flood_gallery_rebuild): slots keep their numbers, learned references
+        are dropped; with no manual reference the gallery is kept as it is (stale)."""
+        if self.reference is None:
             raise FloodSimError("no reference to rebuild; set one first")
-        self.reference = self._manual_gallery()
-        self.manual_slots = list(range(len(self.manual_refs)))   # an empty gallery fills slots in order
-        self.device.reset()      # a pending learning candidate belongs to the old gallery
-        self.ref_version = self.geometry_version
-        self.dense_cache.clear()
+        frames = {slot: gray for slot, (gray, _) in zip(self.manual_slots, self.manual_refs)}
+        if self.reference.rebuild(frames) == "done":
+            self.ref_version = self.geometry_version
+            self.device.forget_candidate()
+            self.dense_cache.clear()
         return self.ref_status()
 
     def clear_references(self) -> RefStatus:
@@ -319,6 +324,8 @@ class Session:
         self.geometry = g
         self.geometry_version += 1
         self.dense_cache.clear()
+        if self.reference is not None:
+            self.rebuild_reference()          # the device rebuilds on its next tick
         return self.overlay_geometry()
 
     def overlay_geometry(self) -> dict:
@@ -342,6 +349,7 @@ class Session:
     def sample(self, idx: int, retry_gap: float = 1.0) -> dict:
         src = self._src()
         t = src.timestamp(idx)
+        self.device.set_learning(not self.ref_status().stale)   # flood_task.c: no learning while stale
         r = sample_device_at(self.device, self.reference, FrameFeeder(self.core, src, self.boxes), t, retry_gap)
         if r.admitted:     # the live gallery changed: cached scores no longer hold
             self.dense_cache.clear()
@@ -351,30 +359,26 @@ class Session:
         return dict(row)
 
     def reset_device(self) -> RefStatus:
-        """Clear the capture state and forget learned references (manual ones are
-        rebuilt under the current geometry)."""
+        """Clear the capture state and forget learned references: a gallery of the manual
+        baselines alone, built under the current geometry (none left: no gallery)."""
         self.device.reset()
-        if self.reference is not None:
-            self._rebuild_or_drop()
-        return self.ref_status()
-
-    def _rebuild_or_drop(self) -> None:
-        """Rebuild the manual baselines; with none left (the last one was deleted), the
-        learned references cannot be rebuilt either, so the gallery is dropped."""
         if self.manual_refs:
-            self.rebuild_reference()
+            self.reference = self._manual_gallery()
+            self.manual_slots = list(range(len(self.manual_refs)))   # an empty gallery fills slots in order
+            self.ref_version = self.geometry_version
         else:
             self.reference = None
             self.ref_version = None
-            self.dense_cache.clear()
+        self.dense_cache.clear()
+        return self.ref_status()
 
     # ---------------------------------------------------------------- runs
     def run_batch(self, params: RunParams, progress=None, cancel=None) -> dict:
         src = self._src()
         # Headless runs use a reference built under the current geometry, as the CLI does.
-        rebuilt = self.reference is not None and self.ref_status().stale
-        if rebuilt:
-            self._rebuild_or_drop()
+        rebuilt = False
+        if self.reference is not None and self.ref_status().stale:
+            rebuilt = not self.rebuild_reference().stale   # learned-only: stays stale, scored as is
         if params.mode == "dense" and (self.reference is None or not self.reference.ready):
             raise FloodSimError("dense runs need a dry reference")
         self.boxes.missing_frames.clear()
