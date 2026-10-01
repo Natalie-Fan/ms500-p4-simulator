@@ -249,7 +249,7 @@ class Session:
 
     def clear_references(self) -> RefStatus:
         self.reference = None
-        self.device.reset()      # a pending learning candidate belongs to the old gallery
+        self.device.forget_candidate()   # a pending learning candidate belongs to the old gallery
         self.manual_refs.clear()
         self.manual_slots.clear()
         self.ref_version = None
@@ -400,7 +400,7 @@ class Session:
             if gallery is not None:
                 self.reference = gallery
                 self.manual_slots = list(range(len(self.manual_refs)))   # built by _manual_gallery(); runs never move manual slots
-                self.device.reset()      # the session's pending candidate belongs to the old gallery
+                self.device.forget_candidate()   # the session's pending candidate belongs to the old gallery
                 self.dense_cache.clear()
                 adopted = True
         self._label_rows(out.rows)

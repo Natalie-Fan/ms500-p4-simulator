@@ -413,3 +413,18 @@ def test_only_learned_references_left_stay_stale_until_a_new_baseline(core, buil
     s.delete_reference(0, "manual")
     s.reset_device()                                            # sim-only: forgets learned references
     assert not s.ref_status().ready
+
+
+def test_replacing_the_gallery_keeps_the_heartbeat_count(core, build_info, tmp_path):
+    # The device has no "replace the gallery" step that touches its capture state: only the
+    # pending learning candidate goes, the heartbeat counter carries on.
+    clip = write_frame_folder(tmp_path / "lit", [(0, dry_gray()), (60000, dusk_gray())])
+    s = Session(core, build_info)
+    s.open(clip, no_detector=True)
+    s.set_reference_frame(0)
+    assert [s.sample(0)["since_image"] for _ in range(2)] == [1, 2]
+    s.clear_references()
+    s.set_reference_frame(0)
+    assert s.sample(0)["since_image"] == 3
+    s.run_batch(RunParams(mode="device", period=60.0))
+    assert s.sample(0)["since_image"] == 4

@@ -394,13 +394,15 @@ static void test_transient_noise_not_learned(void)
     void *dev = sim_device_new();
     sim_gallery_add_manual(g, g_dry);
     sim_result_t r;
-    int admitted = 0;
+    int admitted = 0, pending = 0;
     for (int k = 0; k < 10; ++k) {
         synth_relit(frame, 4, 3, 5000 + 97 * k);
         script_t step = { { frame, frame }, { 0, 0 }, { k, k }, 0 };
         sim_device_sample(dev, g, scripted, &step, &r);
         admitted += r.admitted;
+        pending += r.candidate_pending;
     }
+    CHECK(pending > 0);                     /* candidates do form: it is the proof that fails */
     CHECK(admitted == 0 && sim_gallery_count(g) == 1);
     sim_device_free(dev);
     sim_gallery_free(g);
@@ -453,6 +455,7 @@ static void test_full_manual_gallery_drops_proven_candidate(void)
     sim_result_t r;
     script_t relit = { { g_relit, g_relit }, { 0, 0 }, { 0, 1 }, 0 };
     sim_device_sample(dev, g, scripted, &relit, &r);
+    CHECK(r.candidate_pending);             /* a candidate forms; it just has nowhere to go */
     sim_device_sample(dev, g, scripted, &relit, &r);
     CHECK(!r.admitted && sim_gallery_count(g) == 8);
     sim_device_free(dev);
