@@ -226,6 +226,9 @@ class Core:
         fn("sim_gallery_slot", c_int32, c_void_p, c_int32, POINTER(c_int32), POINTER(c_uint32))
         fn("sim_gallery_delete_slot", c_int32, c_void_p, c_int32, c_int32)
         fn("sim_gallery_clear_auto", c_int32, c_void_p)
+        fn("sim_gallery_add_manual_slot", c_int32, c_void_p, _U8P)
+        fn("sim_gallery_rebuild", c_int32, c_void_p, POINTER(_U8P), POINTER(c_int32))
+        fn("sim_gallery_size", c_int32)
         fn("sim_correlation_at", c_float, c_void_p, c_int32, _U8P, c_int32, c_int32)
         fn("sim_box_from_accelerator", None, c_float, c_float, c_float, c_float, c_float,
            c_int32, c_int32, c_int32, POINTER(_SimBox))
@@ -235,6 +238,7 @@ class Core:
         fn("sim_device_free", None, c_void_p)
         fn("sim_device_reset", None, c_void_p)
         fn("sim_device_forget_candidate", None, c_void_p)
+        fn("sim_device_set_learning", None, c_void_p, c_int32)
         fn("sim_device_sample", None, c_void_p, c_void_p, _PROVIDER_FN, c_void_p, POINTER(_SimResult))
 
     # names and constants
@@ -371,6 +375,18 @@ class Gallery:
         """flood_gallery_clear_auto(): frees every learned slot; returns how many."""
         return self._core._lib.sim_gallery_clear_auto(self.ptr)
 
+    def rebuild(self, frames: dict[int, np.ndarray]) -> str:
+        """flood_gallery_rebuild(): rebuild each MANUAL slot from frames[slot] under the current
+        geometry; a slot missing from `frames` has no frame. "done" | "nothing" | "retry"."""
+        n = self._core._lib.sim_gallery_max_slots()
+        kept = [_check_gray(frames[i]) if i in frames else None for i in range(n)]
+        ptrs = (_U8P * n)(*[_u8(g) if g is not None else _U8P() for g in kept])
+        status = (c_int32 * n)(*[0 if g is not None else 1 for g in kept])
+        rc = self._core._lib.sim_gallery_rebuild(self.ptr, ptrs, status)
+        if rc == 0:
+            self.geometry = tuple(self._core.get_geometry())
+        return ("done", "nothing", "retry")[rc]
+
     @property
     def count(self) -> int:
         return self._core._lib.sim_gallery_count(self.ptr) if self.ptr else 0
@@ -416,6 +432,10 @@ class Device:
     def forget_candidate(self) -> None:
         """Drop a pending learning candidate, keeping the capture state (heartbeat counter)."""
         self._core._lib.sim_device_forget_candidate(self._ptr)
+
+    def set_learning(self, on: bool) -> None:
+        """flood_task.c pauses learning while the gallery is stale; off also drops a candidate."""
+        self._core._lib.sim_device_set_learning(self._ptr, 1 if on else 0)
 
     def sample(self, ref: Gallery | None, provider: Provider) -> DeviceResult:
         """One firmware sampling cycle; may admit an AUTO reference into `ref`."""

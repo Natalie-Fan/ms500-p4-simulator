@@ -111,6 +111,15 @@ SIM_API int32_t sim_gallery_slot(const void *gallery, int32_t index, int32_t *so
 SIM_API int32_t sim_gallery_delete_slot(void *gallery, int32_t index, int32_t source);
 /* flood_gallery_clear_auto(): frees every learned slot; returns how many. */
 SIM_API int32_t sim_gallery_clear_auto(void *gallery);
+/* flood_gallery_add_manual(): the slot the new MANUAL reference took (0..7), -1 if the
+ * gallery is full of manual references, -2 if the geometry leaves no usable window. */
+SIM_API int32_t sim_gallery_add_manual_slot(void *gallery, const uint8_t *gray);
+/* flood_gallery_rebuild() with in-memory frames: status[i] is 0 (frames[i] holds slot i's
+ * frame), 1 (absent) or 2 (read error). Returns 0 done, 1 nothing, 2 retry. */
+SIM_API int32_t sim_gallery_rebuild(void *gallery, const uint8_t *const frames[8],
+                                    const int32_t status[8]);
+/* sizeof(flood_gallery_t), so tests can snapshot a gallery byte for byte. */
+SIM_API int32_t sim_gallery_size(void);
 SIM_API float   sim_correlation_at(const void *gallery, int32_t slot, const uint8_t *gray,
                                    int32_t dx, int32_t dy);
 SIM_API void    sim_box_from_accelerator(float x0, float y0, float x1, float y1, float confidence,
@@ -129,6 +138,9 @@ SIM_API void  sim_device_reset(void *dev);
 /* Drops a pending learning candidate only (flood_task.c does this when learned or manual
  * references are deleted); the capture state is kept. */
 SIM_API void  sim_device_forget_candidate(void *dev);
+/* flood_task.c pauses learning while the gallery is stale: when off, samples pass no learner
+ * (and switching off drops a pending candidate). On by default. */
+SIM_API void  sim_device_set_learning(void *dev, int32_t on);
 /* One firmware sampling cycle; may admit an AUTO reference into `gallery`. */
 SIM_API void  sim_device_sample(void *dev, void *gallery, sim_provider_fn provider,
                                 void *user, sim_result_t *out);

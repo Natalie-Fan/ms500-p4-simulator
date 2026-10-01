@@ -518,6 +518,136 @@ static void test_forget_candidate(void)
     sim_gallery_free(g);
 }
 
+/* A gallery with MANUAL dry (slot 0), a learned relit (slot 1) and MANUAL flood (slot 2),
+ * after two readings (cycle_counter 2). */
+static void *gallery_with_learned(void *dev)
+{
+    void *g = sim_gallery_new();
+    sim_result_t r;
+    sim_gallery_add_manual(g, g_dry);
+    script_t relit = { { g_relit, g_relit }, { 0, 0 }, { 0, 1 }, 0 };
+    sim_device_sample(dev, g, scripted, &relit, &r);
+    sim_device_sample(dev, g, scripted, &relit, &r);
+    sim_gallery_add_manual(g, g_flood);
+    return g;
+}
+
+static void test_add_manual_returns_slot(void)
+{
+    void *g = sim_gallery_new();
+    CHECK(sim_gallery_add_manual_slot(g, g_dry) == 0);
+    CHECK(sim_gallery_add_manual_slot(g, g_dry) == 1);
+    for (int i = 2; i < 8; ++i) CHECK(sim_gallery_add_manual_slot(g, g_dry) == i);
+    CHECK(sim_gallery_add_manual_slot(g, g_dry) == -1);
+    CHECK(sim_gallery_add_manual_slot(NULL, g_dry) == -2);
+    CHECK(sim_gallery_add_manual(g, g_dry) == -1);              /* old contract unchanged */
+    sim_gallery_free(g);
+}
+
+/* After the lines move, every MANUAL slot is rebuilt in place from its frame and samples where
+ * the new lines put the strip, exactly as a fresh capture would; learned slots are dropped. */
+static void test_rebuild_all_frames(void)
+{
+    float d[8];
+    const float moved[8] = { 560.0f, 100.0f, 1920.0f, 150.0f, 560.0f, 160.0f, 1920.0f, 190.0f };
+    sim_get_geometry(d);
+    void *dev = sim_device_new();
+    void *g = gallery_with_learned(dev);
+    void *stale = gallery_with_learned(dev);
+    uint32_t last0 = 0;
+    sim_gallery_slot(g, 0, NULL, &last0);
+
+    sim_set_geometry(moved);
+    void *fresh = sim_gallery_new();
+    sim_gallery_add_manual(fresh, g_dry);
+    const uint8_t *frames[8] = { g_dry, NULL, g_flood, NULL, NULL, NULL, NULL, NULL };
+    const int32_t status[8] = { 0, 1, 0, 1, 1, 1, 1, 1 };
+    CHECK(sim_gallery_rebuild(g, frames, status) == 0);
+    int32_t source = -1;
+    uint32_t last = 0;
+    CHECK(sim_gallery_count(g) == 2);
+    CHECK(sim_gallery_slot(g, 0, &source, &last) == 1 && source == 0 && last == last0);
+    CHECK(sim_gallery_slot(g, 1, NULL, NULL) == 0);
+    CHECK(sim_gallery_slot(g, 2, &source, NULL) == 1 && source == 0);
+    CHECK(fabsf(sim_correlation_at(g, 0, g_flood, 0, 0) -
+                sim_correlation_at(fresh, 0, g_flood, 0, 0)) < 1e-6f);
+    CHECK(fabsf(sim_correlation_at(stale, 0, g_flood, 0, 0) -
+                sim_correlation_at(fresh, 0, g_flood, 0, 0)) > 1e-3f);
+
+    /* cycle_counter carried over: the next reading stamps cycle 3, not 1. */
+    sim_result_t r;
+    script_t dry = { { g_dry, g_dry }, { 0, 0 }, { 5, 6 }, 0 };
+    sim_device_sample(dev, g, scripted, &dry, &r);
+    CHECK(r.gallery_slot == 0 && sim_gallery_slot(g, 0, NULL, &last) == 1 && last == 3);
+
+    sim_set_geometry(d);
+    sim_gallery_free(fresh);
+    sim_gallery_free(stale);
+    sim_gallery_free(g);
+    sim_device_free(dev);
+}
+
+/* Absent frames drop their slots; no frame at all, or a read error anywhere (even after other
+ * slots were rebuilt), leaves the gallery byte-identical; a learned-only gallery is NOTHING. */
+static void test_rebuild_absent_none_and_errors(void)
+{
+    void *dev = sim_device_new();
+    void *g = gallery_with_learned(dev);
+    const size_t size = (size_t)sim_gallery_size();
+    unsigned char *before = malloc(size);
+    memcpy(before, g, size);
+    const uint8_t *frames[8] = { g_dry, NULL, g_flood, NULL, NULL, NULL, NULL, NULL };
+
+    const int32_t none[8] = { 1, 1, 1, 1, 1, 1, 1, 1 };
+    CHECK(sim_gallery_rebuild(g, frames, none) == 1 && memcmp(before, g, size) == 0);
+    const int32_t err_first[8] = { 2, 1, 0, 1, 1, 1, 1, 1 };
+    CHECK(sim_gallery_rebuild(g, frames, err_first) == 2 && memcmp(before, g, size) == 0);
+    const int32_t err_last[8] = { 0, 1, 2, 1, 1, 1, 1, 1 };   /* slot 0 rebuilt, then slot 2 fails */
+    CHECK(sim_gallery_rebuild(g, frames, err_last) == 2 && memcmp(before, g, size) == 0);
+
+    const int32_t partial[8] = { 1, 1, 0, 1, 1, 1, 1, 1 };
+    CHECK(sim_gallery_rebuild(g, frames, partial) == 0);
+    CHECK(sim_gallery_count(g) == 1 && sim_gallery_slot(g, 2, NULL, NULL) == 1);
+
+    void *dev2 = sim_device_new();
+    void *learned = gallery_with_learned(dev2);
+    sim_gallery_delete_slot(learned, 0, 0);
+    sim_gallery_delete_slot(learned, 2, 0);                     /* only the learned slot 1 left */
+    const int32_t all[8] = { 0, 0, 0, 0, 0, 0, 0, 0 };
+    CHECK(sim_gallery_rebuild(learned, frames, all) == 1 && sim_gallery_count(learned) == 1);
+
+    free(before);
+    sim_gallery_free(learned);
+    sim_gallery_free(g);
+    sim_device_free(dev2);
+    sim_device_free(dev);
+}
+
+/* Learning off (a stale gallery): a qualifying frame forms no candidate and is never admitted;
+ * switching off drops a pending candidate; on again, it learns. */
+static void test_learning_switch(void)
+{
+    void *g = sim_gallery_new();
+    void *dev = sim_device_new();
+    sim_result_t r;
+    sim_gallery_add_manual(g, g_dry);
+    script_t relit = { { g_relit, g_relit }, { 0, 0 }, { 0, 1 }, 0 };
+    sim_device_sample(dev, g, scripted, &relit, &r);
+    CHECK(r.candidate_pending);
+    sim_device_set_learning(dev, 0);
+    sim_device_set_learning(NULL, 0);
+    for (int i = 0; i < 3; ++i) {
+        sim_device_sample(dev, g, scripted, &relit, &r);
+        CHECK(!r.admitted && !r.candidate_pending);
+    }
+    sim_device_set_learning(dev, 1);
+    sim_device_sample(dev, g, scripted, &relit, &r);
+    sim_device_sample(dev, g, scripted, &relit, &r);
+    CHECK(r.admitted && sim_gallery_count(g) == 2);
+    sim_device_free(dev);
+    sim_gallery_free(g);
+}
+
 static void test_band_coverage(void)
 {
     const sim_box_t road = { 0.0f, 900.0f, 1919.0f, 1079.0f, 0.9f, 2 };  /* below the lane line */
@@ -556,6 +686,10 @@ int main(void)
     test_full_manual_gallery_drops_proven_candidate();
     test_gallery_delete();
     test_forget_candidate();
+    test_add_manual_returns_slot();
+    test_rebuild_all_frames();
+    test_rebuild_absent_none_and_errors();
+    test_learning_switch();
     test_band_coverage();
 
     free(g_dry);

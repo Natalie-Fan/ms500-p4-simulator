@@ -241,3 +241,26 @@ def test_device_forget_candidate(core):
     dev.forget_candidate()
     r = dev.sample(g, dusk)
     assert (r.admitted, r.candidate_pending, r.gallery_count) == (False, True, 1)
+
+
+def test_gallery_rebuild_follows_the_rule(core):
+    g = core.new_gallery()
+    g.add_manual(dry_gray())                                   # slot 0
+    g.add_manual(dusk_gray())                                  # slot 1
+    assert g.rebuild({}) == "nothing" and g.count == 2
+    assert g.rebuild({1: dusk_gray()}) == "done"
+    assert [(i, src) for i, src, _ in g.slots()] == [(1, "manual")]
+    assert not g.is_stale()
+
+
+def test_device_learning_switch(core):
+    g = core.new_gallery()
+    g.add_manual(dry_gray())
+    dev = core.new_device()
+    dusk = _provider([(dusk_gray(), [], 7)] * 2)
+    dev.set_learning(False)
+    rows = [dev.sample(g, dusk) for _ in range(3)]
+    assert not any(r.admitted or r.candidate_pending for r in rows)
+    dev.set_learning(True)
+    dev.sample(g, dusk)
+    assert dev.sample(g, dusk).admitted

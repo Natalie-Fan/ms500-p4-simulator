@@ -207,11 +207,8 @@ int32_t sim_gallery_count(const void *gallery)
  * then flood_gallery_add_manual(). */
 int32_t sim_gallery_add_manual(void *gallery, const uint8_t *gray)
 {
-    if (!gallery || !gray) return 0;
-    static flood_reference_t ref;   /* ~19KB; the shim is single-threaded */
-    const flood_gray_t dry = full_frame(gray);
-    if (!flood_reference_init(&ref, &dry)) return 0;
-    return flood_gallery_add_manual((flood_gallery_t *)gallery, &ref) ? 1 : -1;
+    const int32_t slot = sim_gallery_add_manual_slot(gallery, gray);
+    return slot >= 0 ? 1 : (slot == -1 ? -1 : 0);
 }
 
 static const flood_gallery_slot_t *slot_at(const void *gallery, int32_t index)
@@ -241,6 +238,47 @@ int32_t sim_gallery_clear_auto(void *gallery)
 {
     return flood_gallery_clear_auto((flood_gallery_t *)gallery);
 }
+
+int32_t sim_gallery_add_manual_slot(void *gallery, const uint8_t *gray)
+{
+    if (!gallery || !gray) return -2;
+    static flood_reference_t ref;   /* ~19KB; the shim is single-threaded */
+    const flood_gray_t dry = full_frame(gray);
+    if (!flood_reference_init(&ref, &dry)) return -2;
+    return flood_gallery_add_manual((flood_gallery_t *)gallery, &ref);
+}
+
+typedef struct {
+    const uint8_t *const *frames;
+    const int32_t        *status;
+} sim_rebuild_src_t;
+
+static flood_frame_status_t sim_rebuild_load(int slot, uint8_t *gray_out, void *user)
+{
+    const sim_rebuild_src_t *src = user;
+    if (src->status[slot] == 2) return FLOOD_FRAME_ERROR;
+    if (src->status[slot] != 0 || !src->frames[slot]) return FLOOD_FRAME_ABSENT;
+    memcpy(gray_out, src->frames[slot], (size_t)SIM_FRAME_W * SIM_FRAME_H);
+    return FLOOD_FRAME_OK;
+}
+
+int32_t sim_gallery_rebuild(void *gallery, const uint8_t *const frames[8], const int32_t status[8])
+{
+    if (!gallery || !frames || !status) return 1;
+    flood_gallery_t *scratch = malloc(sizeof(*scratch));
+    uint8_t *buf = malloc((size_t)SIM_FRAME_W * SIM_FRAME_H);
+    int32_t rc = 2;                 /* an allocation failure is a RETRY, as on the device */
+    if (scratch && buf) {
+        sim_rebuild_src_t src = { frames, status };
+        rc = (int32_t)flood_gallery_rebuild((flood_gallery_t *)gallery, scratch, buf,
+                                            sim_rebuild_load, &src);
+    }
+    free(buf);
+    free(scratch);
+    return rc;
+}
+
+int32_t sim_gallery_size(void) { return (int32_t)sizeof(flood_gallery_t); }
 
 float sim_correlation_at(const void *gallery, int32_t slot, const uint8_t *gray,
                          int32_t dx, int32_t dy)
@@ -331,6 +369,7 @@ typedef struct {
     sim_provider_fn provider;
     void           *user;
     flood_gallery_learner_t *learner;   /* pending learning candidate, like flood_task.c's */
+    int32_t learning;   /* flood_task.c: no learning while the gallery is stale */
 } sim_device_t;
 
 void *sim_device_new(void)
@@ -342,6 +381,7 @@ void *sim_device_new(void)
     d->learner = malloc(sizeof(*d->learner));
     if (!d->learner) { free(d->gray); free(d); return NULL; }
     flood_gallery_learner_init(d->learner);
+    d->learning = 1;
     flood_capture_init(&d->capture);
     return d;
 }
@@ -365,6 +405,14 @@ void sim_device_forget_candidate(void *dev)
 {
     sim_device_t *d = dev;
     if (d) flood_gallery_learner_init(d->learner);
+}
+
+void sim_device_set_learning(void *dev, int32_t on)
+{
+    sim_device_t *d = dev;
+    if (!d) return;
+    d->learning = on ? 1 : 0;
+    if (!on) flood_gallery_learner_init(d->learner);
 }
 
 /* flood_grab_fn: attempt N of flood_capture_sample() asks the provider for
@@ -452,7 +500,7 @@ void sim_device_sample(void *dev, void *gallery, sim_provider_fn provider, void 
         /* flood_task.c:306-312 -- the gallery bookkeeping after every reading. */
         bool admitted = false, notice = false;
         float notice_corr = 0.0f;
-        flood_gallery_after_sample(g, d->learner, &sampled, dec.curb_correlation, dec.gallery_index,
+        flood_gallery_after_sample(g, d->learning ? d->learner : NULL, &sampled, dec.curb_correlation, dec.gallery_index,
                                    &admitted, &notice, &notice_corr);
         out->admitted = admitted ? 1 : 0;
         out->notice   = notice ? 1 : 0;
