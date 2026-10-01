@@ -89,3 +89,12 @@ def test_verdict_device_row_shows_clock_time(qtbot):
     p.set_start_clock(dt.datetime(2026, 6, 18, 16, 0, 0))
     p.show_device(dict(ROW, sample=165, t_sec=2920.0), 0.45)
     assert p.source_label.text() == "device sample #165 at 16:48:40 (t = 2920 s)"
+
+
+def test_verdict_shows_pending_candidate(qtbot):
+    p = VerdictPanel()
+    qtbot.addWidget(p)
+    p.show_device(dict(ROW, candidate_pending=True), 0.45)
+    assert p.matched_label.text().endswith("; candidate pending: sample again to confirm")
+    p.show_device(dict(ROW, candidate_pending=True, admitted=True), 0.45)
+    assert "candidate pending" not in p.matched_label.text()

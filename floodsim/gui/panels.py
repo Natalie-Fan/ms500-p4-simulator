@@ -174,6 +174,8 @@ class VerdictPanel(QWidget):
             matched += f"; learned a new reference ({row['gallery_count']} now)"
         if row["notice"]:
             matched += "; no confident match for a while: add a baseline for this lighting"
+        if row.get("candidate_pending") and not row["admitted"]:
+            matched += "; candidate pending: sample again to confirm"
         self.matched_label.setText(matched)
         self.label_label.setText(row.get("label") or DASH)
 
@@ -199,7 +201,7 @@ class VerdictPanel(QWidget):
 DEVICE_COLUMNS = [("#", "sample"), ("t (s)", "t_sec"), ("frame", "frame_idx"), ("outcome", "outcome"),
                   ("corr", "curb_correlation"), ("severity", "severity"), ("veto cov", "veto_coverage"),
                   ("slot", "gallery_slot"), ("learned", "admitted"), ("notice", "notice"),
-                  ("refs", "gallery_count"), ("label", "label")]
+                  ("refs", "gallery_count"), ("pending", "candidate_pending"), ("label", "label")]
 DENSE_COLUMNS = [("frame", "frame_idx"), ("t (s)", "t_sec"), ("submerged", "submerged"),
                  ("corr", "curb_correlation"), ("severity", "severity"), ("veto", "veto_usable"),
                  ("veto cov", "veto_coverage"), ("slot", "gallery_slot"), ("label", "label")]
