@@ -393,3 +393,26 @@ def test_clear_learned_keeps_manual_and_drops_the_candidate(core, build_info, tm
     s.clear_learned()
     assert "1 reference(s): 1 manual, 0 learned" in s.ref_status().description
     assert s.ref_status().slots == ((0, "manual", "frame 0 (0.00 s)"),)
+
+
+def test_only_learned_references_left_after_deleting_the_last_manual(core, build_info, tmp_path):
+    clip = write_frame_folder(tmp_path / "lit", [(0, dry_gray()), (60000, dusk_gray())])
+    s = Session(core, build_info)
+    s.open(clip, no_detector=True)
+    s.set_reference_frame(0)
+    s.sample(1)
+    s.sample(1)                                                 # learned in slot 1
+    s.delete_reference(0, "manual")
+    assert "1 reference(s): 0 manual, 1 learned" in s.ref_status().description   # as on the device
+    _stale_geometry(s)
+    with pytest.raises(FloodSimError, match="dense runs need a dry reference"):
+        s.run_batch(RunParams(mode="dense"))                    # rebuilding drops the learned ones
+    assert not s.ref_status().ready
+    assert s.run_batch(RunParams(mode="device", period=60.0))["rows"][0]["outcome"] == "skipped_no_ref"
+
+    s.set_reference_frame(0)
+    s.sample(1)
+    s.sample(1)
+    s.delete_reference(0, "manual")
+    s.reset_device()                                            # forgets learned references
+    assert not s.ref_status().ready

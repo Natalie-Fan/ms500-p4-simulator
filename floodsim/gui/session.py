@@ -354,19 +354,29 @@ class Session:
         """Clear the capture state and forget learned references (manual ones are
         rebuilt under the current geometry)."""
         self.device.reset()
+        if self.reference is not None:
+            self._rebuild_or_drop()
+        return self.ref_status()
+
+    def _rebuild_or_drop(self) -> None:
+        """Rebuild the manual baselines; with none left (the last one was deleted), the
+        learned references cannot be rebuilt either, so the gallery is dropped."""
         if self.manual_refs:
             self.rebuild_reference()
-        return self.ref_status()
+        else:
+            self.reference = None
+            self.ref_version = None
+            self.dense_cache.clear()
 
     # ---------------------------------------------------------------- runs
     def run_batch(self, params: RunParams, progress=None, cancel=None) -> dict:
         src = self._src()
-        if params.mode == "dense" and (self.reference is None or not self.reference.ready):
-            raise FloodSimError("dense runs need a dry reference")
         # Headless runs use a reference built under the current geometry, as the CLI does.
         rebuilt = self.reference is not None and self.ref_status().stale
         if rebuilt:
-            self.rebuild_reference()
+            self._rebuild_or_drop()
+        if params.mode == "dense" and (self.reference is None or not self.reference.ready):
+            raise FloodSimError("dense runs need a dry reference")
         self.boxes.missing_frames.clear()
         reference = self._reference_info()
         adopted = False
