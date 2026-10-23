@@ -98,7 +98,7 @@ ignores changes in brightness and contrast.
 | `upload` | Curb submerged: candidate flood | yes |
 | `clear` | Curb visible: not flooded | no |
 | `blocked` | Obstructed on every try. This is an **abstention**, never "no flood". | no |
-| `heartbeat` | Every 60th reading without a flood: proof of life | yes |
+| `heartbeat` | Dry, and the heartbeat interval (Device Manager *Flood Heartbeat Interval*, minutes; 0 = off) has passed since the last image | yes |
 | `skipped_no_ref` | No dry reference yet, so nothing was assessed | no |
 
 ### Three ways to run it
@@ -230,6 +230,11 @@ timeline, each clip at its real start time (dates carry across midnight).
 | **Add reference** | Adds this frame to the gallery as a manual reference (the device's Capture Baseline). |
 | **Reset state** | Sets the heartbeat counter ("since image") back to 0 and **forgets learned references**; manual ones stay. |
 
+### Upload area, heartbeat and serial number
+
+- **Upload area:** the part of the frame the camera sends. Use **Upload area ▸ Draw** (or the *Draw upload area* tool) to draw it and **Upload area ▸ Delete** to remove it. It is saved to `<input>.upload_area.json`. The orange box shows the area in use, and it is dashed when it is derived from the curb and lane lines.
+- **Heartbeat** and **Serial number** are in the State panel. The device run dialog starts from the heartbeat value.
+
 ### Tuning the curb and lane lines
 
 1. Choose **Edit curb line** (or **Edit lane line**). Handles appear on the line's two ends.
@@ -308,6 +313,7 @@ floodsim run INPUT [--mode device|dense] [--reference IMG ...] [--reference-at S
                    [--geometry GEO.json] [--labels LABELS.csv] [--out DIR]
                    [--period 60] [--retry-gap 1] [--every 1]
                    [--no-detector] [--model models/traffic.onnx] [--conf 0.5]
+                   [--heartbeat MIN] [--upload-area X,Y,W,H|FILE.json] [--sn SN]
                    [--fps F] [--allow-stretch] [--no-rebuild]
 ```
 
@@ -319,6 +325,9 @@ floodsim run INPUT [--mode device|dense] [--reference IMG ...] [--reference-at S
 | `--labels` | Score the results against ground truth (§7) |
 | `--out` | Output folder. The default is `out/<input>-<mode>-<timestamp>`. It must not already contain files. |
 | `--period`, `--retry-gap` | Device mode timing. `--period` defaults to the firmware's 60 s; shorten it to get more samples (and more reference learning) out of a short clip. |
+| `--heartbeat` | Device mode: heartbeat interval in minutes, 0 to 1440. 0 turns it off. The default is 60. It is converted to readings with `--period`, as the camera does with its 60 s period. |
+| `--upload-area` | Device mode: the drawn upload area, either `x,y,w,h` (whole numbers) or a JSON file from the camera's `GET /api/flood/upload_roi`. A value that is not `x,y,w,h` or a `.json` file stops the run with an error. An area that breaks the firmware rules (sides of at least 32 px, inside 1920×1080, at most 518400 px) gives a warning, and the run uses the curb/lane lines, as the camera would. |
+| `--sn` | Device mode: serial number used in upload file names. The default is `SIM`. |
 | `--every` | Dense mode: score every Nth frame |
 | `--no-detector` | No obstruction boxes at all, including edited ones |
 | `--model`, `--conf` | Detection model (`.onnx`: the device's traffic model; `.pt`: an ultralytics YOLO) and score threshold. The defaults match the device: `models/traffic.onnx`, 0.5, NMS 0.20 across classes, motorcycles dropped. |
@@ -392,7 +401,8 @@ floodsim compare out/some-python-run out/exe.jsonl        # expect 0 differences
 ```
 
 Options: `--reference R.pgm [--reference R2.pgm ...] --frames DIR|LIST [--boxes B.csv] [--geometry G.json]
-[--mode device|dense] [--period 60] [--retry-gap 1] [--every 1] [--fps 1]`.
+[--mode device|dense] [--period 60] [--retry-gap 1] [--every 1] [--fps 1] [--heartbeat-every 60]`.
+`--heartbeat-every` is the number of readings between heartbeats; 0 turns them off.
 It prints one JSON line per sample, with the same fields as `samples.csv`. It reads only 1920×1080
 PGM frames and does no video decoding and no detection. Keep its paths ASCII.
 
@@ -404,10 +414,10 @@ PGM frames and does no video decoding and no detection. Keep its paths ASCII.
 
 | File | Contents |
 |---|---|
-| `run.json` | Everything needed to reproduce the run: input (path, size, modification time), mode, parameters, geometry, reference source, box source, firmware commit and whether its flood code had uncommitted edits, and DLL version. GUI exports also record `cancelled` and `frames_without_boxes`. |
+| `run.json` | Everything needed to reproduce the run: input (path, size, modification time), mode, parameters, geometry, reference source, box source, firmware commit and whether its flood code had uncommitted edits, and DLL version. Device runs also record `heartbeat` (`minutes` and `readings`), `upload_area` (the drawn area, or null), `upload_area_used` (the crop actually used) and `sn`. GUI exports also record `cancelled` and `frames_without_boxes`. |
 | `samples.csv` | One row per sample (device mode) or per scored frame (dense mode); columns below |
 | `summary.txt` | Outcome counts, failed frame reads, references learned, *no confident match* notices, gallery size at the end (device mode), and scoring when labels were given |
-| `uploads/` | Device mode only: the images the camera would have sent, named `<sample>_<label>.jpg`. Half resolution, with a 6-hex ID burned in, as on the device. |
+| `uploads/` | Device mode only: what the camera would have sent. Each `upload` or `heartbeat` writes `<SN>_flood[_hb]_YYYYMMDD_HHMMSS.jpg`, the upload crop of the frame, and a `.json` beside it with the camera's description. |
 
 **`samples.csv`, device mode:** `sample, t_sec, frame_idx, outcome, frames_taken, has_reading,
 curb_correlation, severity, shift_dx, shift_dy, veto_usable, veto_coverage, veto_worst_class,
@@ -422,6 +432,7 @@ since_image, gallery_slot, gallery_source, admitted, notice, gallery_count, cand
 - `admitted` is true when this sample learned a new reference; `notice` when it raised the
   *no confident match* notice; `gallery_count` is the gallery size after the sample.
   `candidate_pending` is true while a candidate awaits its confirming reading.
+- `upload_file` is the name of the image written for this sample, or empty.
 
 **`samples.csv`, dense mode:** `frame_idx, t_sec, veto_usable, veto_coverage, veto_worst_class,
 curb_correlation, submerged, severity, shift_dx, shift_dy, gallery_slot` (+ `label`).

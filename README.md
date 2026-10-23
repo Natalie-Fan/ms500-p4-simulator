@@ -24,6 +24,8 @@ checkout: `export FLOOD_FIRMWARE_DIR=/d/path/to/firmware`.
 ```bash
 # device-faithful decisions (60 s samples, retry, heartbeat) + images the camera would upload
 .venv/Scripts/floodsim run clip.avi --reference dry.jpg
+# a camera's settings: heartbeat every 15 min, its drawn upload area, its serial number
+.venv/Scripts/floodsim run clip.avi --reference dry.jpg --heartbeat 15 --upload-area 400,120,960,540 --sn MS500-H120-EP-2614-1001
 # every frame: correlation / veto curve, scored against labels
 .venv/Scripts/floodsim run clip.avi --mode dense --reference dry.jpg --labels clip.labels.csv
 # regression: did a firmware edit change anything?
@@ -45,6 +47,8 @@ the device does (confidently dry but not yet covered) and flags a run of unmatch
 learns. On the command line every run starts from the manual references only. In the GUI a device
 run also starts from them, then the session keeps the gallery it ended with, so later dense runs,
 Score and the verdict use what was learned (Reset state drops it).
+
+Uploads match the October 2026 firmware: each `upload` or `heartbeat` writes `uploads/<SN>_flood[_hb]_YYYYMMDD_HHMMSS.jpg`, the crop the camera sends (a drawn `--upload-area`, else derived from the curb/lane lines), and a `.json` beside it with the camera's description. Names and descriptions come from the firmware's own `flood_upload_meta.c`. The JPEG is OpenCV quality 90, so it is not byte-identical to the camera's. Times are the clip's real start (`record_YYYYMMDD_HHMMSS`) or the input's modified time, plus the video offset. `samples.csv` names each upload in `upload_file`. `--heartbeat` is in minutes (0 = off, default 60) and is converted to readings with `--period`, as the camera converts it with its 60 s period.
 
 A folder of `record_YYYYMMDD_HHMMSS` videos opens as one timeline at the clips' real start times.
 Device checks that fall between clips are skipped (counted in `summary.txt`), the gallery carries
@@ -77,6 +81,7 @@ correlation-over-time plot aligned with the scrubber (bottom; click it to jump) 
   you rebuild it); draw or delete obstruction boxes (saved to `<input>.boxes.edited.csv`, dashed).
 - **Batch:** Run ▸ Device/Dense runs the same runners as the CLI (the device run dialog sets the
   sample period, default 60 s); File ▸ Export run writes the same run folder as `floodsim run`.
+- **Upload area / heartbeat / serial number:** Upload area ▸ Draw (or the *Draw upload area* tool) and ▸ Delete, saved to `<input>.upload_area.json`. The orange box shows the area in use (dashed when derived from the lines). *Heartbeat* and *Serial number* sit in the State panel. The device run dialog starts from the heartbeat value.
 - All simulator calls run on one background thread; a long batch run delays frame updates until it
   finishes or is cancelled.
 
@@ -84,7 +89,10 @@ correlation-over-time plot aligned with the scrubber (bottom; click it to jump) 
 
 `native/device_constants.h` lists every value copied from firmware device glue (`flood_task.c`,
 `flood_frame_tap.c`, `flood_roi.h`, `flood_geometry_config.c`) with its source line. Re-check it
-when those files change.
+when those files change. The upload crop and names are compiled from `flood_upload_roi.c` and
+`flood_upload_meta.c`. The heartbeat formula is mirrored from `flood_task.c:342`.
+
+`flood_sim.exe` also takes `--heartbeat-every N` (readings between heartbeats, 0 = off).
 
 ## Tests
 
