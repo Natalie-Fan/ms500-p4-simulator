@@ -502,8 +502,8 @@ class Session:
         if params.mode == "device":
             uploads = UploadWriter(out, self.core, drawn=run.upload_area, sn=run.sn,
                                    clock=make_clock(src, src.path))
-            self.core.set_geometry(run.geometry)          # crop with the lines the run used
             try:
+                self.core.set_geometry(run.geometry)          # crop with the lines the run used
                 for row in rows:
                     if row["outcome"] in ("upload", "heartbeat") and row["frame_idx"] >= 0:
                         rgb = src.read_rgb(row["frame_idx"])
@@ -516,8 +516,8 @@ class Session:
                              labels=self.labels_path, build_info=self.build_info, input_path=src.path)
         info["cancelled"] = result.cancelled
         if params.mode == "device":
-            self.core.set_geometry(run.geometry)
             try:
+                self.core.set_geometry(run.geometry)
                 info.update(upload_run_info(self.core, params, run.upload_area, run.sn))
             finally:
                 self.core.set_geometry(self.geometry)

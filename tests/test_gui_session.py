@@ -12,7 +12,7 @@ from floodsim.geometry import Geometry
 from floodsim.gui.session import Session
 from floodsim.modes import RunParams
 from floodsim.report import compare_runs, read_samples
-from floodsim.source import open_source, write_image
+from floodsim.source import open_source, read_image_bgr, write_image
 from tests.synth import dry_gray, dusk_gray, flooded_gray, to_rgb, write_clip, write_frame_folder
 
 CAR = CachedBox(0.0, 0.0, 1919.0, 1079.0, 1.0, "car", 2)
@@ -502,3 +502,10 @@ def test_export_uses_run_geometry(session, tmp_path):
     out = Path(session.export_run(tmp_path / "exp"))
     assert json.loads((out / "run.json").read_text())["upload_area_used"] == used
     assert session.upload_status()["roi"] != used    # the session keeps the edited lines
+    jpgs = sorted((out / "uploads").glob("*.jpg"))
+    assert jpgs
+    for jpg in jpgs:                                  # cropped with the run's lines, not the edited ones
+        assert read_image_bgr(jpg).shape == (used["out_height"], used["out_width"], 3)
+        sidecar = json.loads(jpg.with_suffix(".json").read_text())
+        roi_keys = ("x", "y", "width", "height")
+        assert {k: sidecar["roi"][k] for k in roi_keys} == {k: used[k] for k in roi_keys}
