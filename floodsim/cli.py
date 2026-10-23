@@ -12,10 +12,12 @@ from .core import load_core
 from .errors import FloodSimError
 from .geometry import Geometry, load_geometry
 from .labels import Labels, score_rows
-from .modes import RunParams, UploadWriter, run_dense, run_device
+from .modes import (RunParams, UploadWriter, heartbeat_readings, make_clock, run_dense, run_device,
+                    upload_run_info)
 from .report import compare_runs, make_run_info, prepare_out_dir, summarize, write_run
 from .results import DENSE_FIELDS, DEVICE_FIELDS
 from .source import Normalizer, open_source, read_image_bgr, write_image
+from .upload_area import check_sn, parse_upload_area
 
 log = logging.getLogger("floodsim")
 
@@ -52,6 +54,11 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--every", type=int, default=1, help="dense: score every Nth frame")
     run.add_argument("--no-rebuild", action="store_true", help="use the existing DLL even if stale")
     run.add_argument("--out", type=Path)
+    run.add_argument("--heartbeat", type=int, default=60,
+                     help="device: heartbeat interval in minutes, 0-1440, 0 = off (Device Manager setting)")
+    run.add_argument("--upload-area", help="device: drawn upload area x,y,w,h, or a JSON file from the "
+                                           "camera's GET /api/flood/upload_roi")
+    run.add_argument("--sn", default="SIM", help="device: serial number in upload file names")
 
     detect = sub.add_parser("detect", help="fill the box cache ahead of time")
     add_input(detect)
@@ -124,9 +131,17 @@ def cmd_run(args) -> int:
     ref, ref_info = build_reference(core, source, args.reference, args.reference_at, args.allow_stretch)
     if args.mode == "dense" and ref is None:
         raise FloodSimError("dense mode needs --reference or --reference-at")
-    params = RunParams(args.mode, args.period or core.sample_period_s(), args.retry_gap, args.every)
+    params = RunParams(args.mode, args.period or core.sample_period_s(), args.retry_gap, args.every, args.heartbeat)
     if params.period <= 0 or params.retry_gap < 0 or params.every < 1:
         raise FloodSimError("--period must be > 0, --retry-gap >= 0, --every >= 1")
+    heartbeat_readings(params.heartbeat_minutes, params.period)   # raises on 0-1440 violations
+    sn = check_sn(args.sn)
+    drawn = parse_upload_area(args.upload_area) if args.upload_area else None
+    if args.mode == "dense" and (args.upload_area or args.sn != "SIM" or args.heartbeat != 60):
+        log.info("dense mode never uploads: --heartbeat, --upload-area and --sn are ignored")
+    if drawn is not None and not core.upload_rect_valid(drawn):
+        log.warning("upload area %s breaks the firmware rules (sides >= 32, inside 1920x1080, "
+                    "<= 518400 px); the camera would use the curb/lane lines, and so does this run", drawn)
     labels = Labels.load(args.labels) if args.labels else None
     for w in labels.warnings if labels else []:
         log.warning(w)
@@ -136,7 +151,8 @@ def cmd_run(args) -> int:
 
     if args.mode == "device":
         result = run_device(core, source, boxes, ref, params,
-                            uploads=UploadWriter(out, core.upload_downscale()))
+                            uploads=UploadWriter(out, core, drawn=drawn, sn=sn,
+                                                 clock=make_clock(source, args.input)))
         fields = list(DEVICE_FIELDS)
     else:
         result = run_dense(core, source, boxes, ref, params)
@@ -153,6 +169,8 @@ def cmd_run(args) -> int:
     run_info = make_run_info(source=source, mode=args.mode, params=params, geometry=geometry,
                              reference=ref_info, boxes=boxes.description, labels=args.labels,
                              build_info=build_info, input_path=args.input)
+    if args.mode == "device":
+        run_info.update(upload_run_info(core, params, drawn, sn))
     write_run(out, run_info, result.rows, fields,
               summarize(result.rows, args.mode, result.decode_failures, score,
                         skipped_no_footage=result.skipped_no_footage))

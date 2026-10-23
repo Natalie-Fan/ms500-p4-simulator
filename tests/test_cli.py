@@ -1,3 +1,4 @@
+import json
 import subprocess
 
 import pytest
@@ -33,7 +34,7 @@ def test_run_device_writes_run_folder(scenario):
     rows = read_samples(tmp / "dev")
     assert [r["outcome"] for r in rows] == ["clear", "upload", "clear"]
     assert (tmp / "dev" / "run.json").exists() and (tmp / "dev" / "summary.txt").exists()
-    assert len(list((tmp / "dev" / "uploads").iterdir())) == 1
+    assert len(list((tmp / "dev" / "uploads").glob("*.jpg"))) == 1
 
 
 def test_run_dense_with_labels(scenario):
@@ -159,3 +160,48 @@ def test_export_refuses_a_folder_of_clips(tmp_path, capsys):
     write_clip(folder, "20260618_160000", [dry_gray()] * 2)
     assert main(["export", str(folder), "--no-detector", "--out", str(tmp_path / "e")]) == 2
     assert "export does not support folders of clips" in capsys.readouterr().err
+
+
+def _run(scenario, name, *extra):
+    folder, ref, tmp = scenario
+    out = tmp / name
+    assert main(["run", str(folder), "--reference", str(ref), "--out", str(out), *extra]) == 0
+    return out, json.loads((out / "run.json").read_text())
+
+
+def test_cli_upload_options_reach_run_json(scenario):
+    out, info = _run(scenario, "dev", "--heartbeat", "0", "--upload-area", "0,0,640,480", "--sn", "CAM-1")
+    assert info["heartbeat"] == {"minutes": 0, "readings": 0}
+    assert info["upload_area"] == {"x": 0, "y": 0, "width": 640, "height": 480}
+    assert info["upload_area_used"]["source"] == "drawn" and info["sn"] == "CAM-1"
+    jpgs = list((out / "uploads").glob("*.jpg"))
+    assert jpgs and all(p.name.startswith("CAM-1_flood_") for p in jpgs)
+    assert "upload_file" in (out / "samples.csv").read_text().splitlines()[0]
+
+
+def test_cli_invalid_upload_area_warns_and_uses_lines(scenario, caplog):
+    _, info = _run(scenario, "dev", "--upload-area", "1900,0,100,100")
+    assert info["upload_area"] == {"x": 1900, "y": 0, "width": 100, "height": 100}
+    assert info["upload_area_used"]["source"] == "lines"
+    assert "upload area" in caplog.text.lower()
+
+
+@pytest.mark.parametrize("args", [["--heartbeat", "2000"], ["--sn", "bad sn"], ["--upload-area", "1,2,3"]])
+def test_cli_rejects_bad_upload_options(scenario, args):
+    folder, ref, tmp = scenario
+    assert main(["run", str(folder), "--reference", str(ref), "--out", str(tmp / "o"), *args]) == 2
+
+
+def test_cli_dense_ignores_upload_options(scenario):
+    folder, ref, tmp = scenario
+    out = tmp / "dense"
+    assert main(["run", str(folder), "--mode", "dense", "--reference", str(ref),
+                 "--heartbeat", "5", "--sn", "X", "--out", str(out)]) == 0
+    assert not (out / "uploads").exists()
+
+
+def test_compare_ignores_upload_names(scenario):
+    a, _ = _run(scenario, "a", "--sn", "A")
+    b, _ = _run(scenario, "b", "--sn", "B")
+    assert main(["compare", str(a), str(b)]) == 0
+    assert compare_runs(a, b) == []
