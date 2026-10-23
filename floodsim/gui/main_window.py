@@ -46,9 +46,14 @@ class RunDialog(QDialog):
         self.every = QSpinBox()
         self.every.setRange(1, 100000)
         self.every.setValue(defaults.every)
+        self.heartbeat = QSpinBox()
+        self.heartbeat.setRange(0, 1440)
+        self.heartbeat.setSuffix(" min")
+        self.heartbeat.setValue(defaults.heartbeat_minutes)
         if self._mode == "device":
             form.addRow("Sample period", self.period)
             form.addRow("Retry gap", self.retry)
+            form.addRow("Heartbeat", self.heartbeat)
         else:
             form.addRow("Score every Nth frame", self.every)
         buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
@@ -57,7 +62,8 @@ class RunDialog(QDialog):
         form.addRow(buttons)
 
     def params(self) -> RunParams:
-        return RunParams(self._mode, self.period.value(), self.retry.value(), self.every.value())
+        return RunParams(self._mode, self.period.value(), self.retry.value(), self.every.value(),
+                         self.heartbeat.value())
 
 
 class MainWindow(QMainWindow):
@@ -155,6 +161,9 @@ class MainWindow(QMainWindow):
         self._action(m, "Reset to firmware default", self._reset_geometry)
         m = bar.addMenu("&Boxes")
         self._action(m, "Revert frame to detector boxes", self._revert_boxes)
+        m = bar.addMenu("&Upload area")
+        self.upload_draw_action = self._action(m, "Draw", lambda: self.tools.tool_buttons[Tool.DRAW_UPLOAD].setChecked(True))
+        self.upload_delete_action = self._action(m, "Delete", self._delete_upload_area)
         m = bar.addMenu("&Run")
         self._action(m, "Device run…", lambda: self._start_run("device"))
         self._action(m, "Dense run…", lambda: self._start_run("dense"))
@@ -198,6 +207,9 @@ class MainWindow(QMainWindow):
         self.frame_view.geometryEdited.connect(self._on_geometry_edited)
         self.frame_view.boxDrawn.connect(self._on_box_drawn)
         self.frame_view.boxDeleteRequested.connect(self._on_box_delete)
+        self.frame_view.uploadAreaDrawn.connect(self._on_upload_drawn)
+        self.verdict.heartbeatChanged.connect(self._on_heartbeat_changed)
+        self.verdict.snChanged.connect(self._on_sn_changed)
         self.timeline.seekFrame.connect(self._navigate)
         self.timeline.playToggled.connect(self._set_playing)
         self.samples.frameRequested.connect(self._navigate)
@@ -258,6 +270,8 @@ class MainWindow(QMainWindow):
         start = info.get("start_clock")
         self.timeline.set_clock(start, info.get("gaps", []), info.get("clips", []))
         self.verdict.set_start_clock(start)
+        self.verdict.heartbeat_spin.setValue(self.session.heartbeat_minutes)
+        self.verdict.sn_edit.setText(self.session.sn)
         self.timeline.set_labels([])
         self.samples.set_rows([], "device")
         if self._overlay:
@@ -368,6 +382,8 @@ class MainWindow(QMainWindow):
         self._overlay = overlay
         self.frame_view.set_geometry_overlay(overlay)
         self.timeline.set_threshold(overlay["submerged_below"])
+        self.verdict.show_upload(overlay["upload"]["text"])
+        self.upload_delete_action.setEnabled(overlay["upload"]["drawn"] is not None)
 
     def _refresh_reference(self) -> None:
         self.worker.submit(self.session.ref_status, self._on_ref_status)
@@ -433,6 +449,28 @@ class MainWindow(QMainWindow):
 
     def _clear_learned(self) -> None:
         self.worker.submit(self.session.clear_learned, self._after_reference)
+
+    # --------------------------------------------- upload area, heartbeat, sn
+    def _on_upload_drawn(self, rect: QRectF) -> None:
+        w, h = int(round(rect.width())), int(round(rect.height()))
+        answer = QMessageBox.question(self, "Upload area", f"Save the upload area {w}×{h}?",
+                                      QMessageBox.Save | QMessageBox.Cancel)
+        if answer != QMessageBox.Save:
+            return
+        r = (int(round(rect.x())), int(round(rect.y())), w, h)
+        self.worker.submit(lambda: self.session.set_upload_area(r), self._on_overlay, self._show_error)
+
+    def _delete_upload_area(self) -> None:
+        self.worker.submit(lambda: self.session.set_upload_area(None), self._on_overlay, self._show_error)
+
+    def _on_heartbeat_changed(self, minutes: int) -> None:
+        self.worker.submit(lambda: self.session.set_heartbeat(minutes), self._on_overlay, self._show_error)
+
+    def _on_sn_changed(self, sn: str) -> None:
+        def failed(message: str) -> None:
+            self.verdict.sn_edit.setText(self.session.sn)
+            self._show_error(message)
+        self.worker.submit(lambda: self.session.set_sn(sn), lambda _: None, failed)
 
     # ------------------------------------------------------------ geometry
     def _apply_geometry(self, g: Geometry) -> None:
@@ -540,7 +578,8 @@ class MainWindow(QMainWindow):
         if self._n == 0 or self._cancel is not None:
             return
         period = self._overlay["sample_period_s"] if self._overlay else RunParams().period
-        dialog = RunDialog(RunParams(mode=mode, period=period), self)
+        dialog = RunDialog(RunParams(mode=mode, period=period,
+                                      heartbeat_minutes=self.session.heartbeat_minutes), self)
         if dialog.exec() != QDialog.Accepted:
             return
         params = dialog.params()

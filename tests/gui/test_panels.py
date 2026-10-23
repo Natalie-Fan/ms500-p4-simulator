@@ -99,3 +99,28 @@ def test_verdict_shows_pending_candidate(qtbot):
     assert p.matched_label.text().endswith("; candidate pending: sample again to confirm")
     p.show_device(dict(ROW, candidate_pending=True, admitted=True), 0.45)
     assert "candidate pending" not in p.matched_label.text()
+
+
+def test_verdict_panel_heartbeat_and_sn_fields(qtbot):
+    from floodsim.gui.panels import VerdictPanel
+    p = VerdictPanel()
+    qtbot.addWidget(p)
+    assert p.heartbeat_spin.minimum() == 0 and p.heartbeat_spin.maximum() == 1440
+    assert p.heartbeat_spin.value() == 60 and p.sn_edit.text() == "SIM"
+    with qtbot.waitSignal(p.heartbeatChanged) as hb:
+        p.heartbeat_spin.setValue(5)
+    assert hb.args == [5]
+    with qtbot.waitSignal(p.snChanged) as sn:
+        p.sn_edit.setText("CAM-1")
+        p.sn_edit.editingFinished.emit()
+    assert sn.args == ["CAM-1"]
+    p.show_upload("from lines, 1360×360, full resolution")
+    assert "1360" in p.upload_label.text()
+
+
+def test_rect_problem():
+    from floodsim.gui.upload_area import rect_problem
+    assert rect_problem(0, 0, 960, 540, 32, 518400) is None
+    assert "32" in rect_problem(0, 0, 31, 100, 32, 518400)
+    assert "inside" in rect_problem(1900, 0, 100, 100, 32, 518400)
+    assert "518400" in rect_problem(0, 0, 1000, 600, 32, 518400)

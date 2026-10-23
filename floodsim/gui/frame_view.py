@@ -12,6 +12,8 @@ from PySide6.QtWidgets import (QGraphicsEllipseItem, QGraphicsItem, QGraphicsIte
                                QGraphicsRectItem, QGraphicsScene, QGraphicsSimpleTextItem,
                                QGraphicsView)
 
+from .upload_area import INVALID_COLOR, UPLOAD_COLOR, rect_problem
+
 FRAME_W, FRAME_H = 1920, 1080
 HANDLE_RADIUS = 12.0
 GRAB_RADIUS = 24.0      # how close a press must be to an endpoint to grab it (scene px)
@@ -30,6 +32,7 @@ class Tool(Enum):
     EDIT_LANE = "Edit lane line"
     DRAW_BOX = "Draw box"
     DELETE_BOX = "Delete box"
+    DRAW_UPLOAD = "Draw upload area"
 
 
 @dataclass
@@ -40,6 +43,7 @@ class OverlayToggles:
     align: bool = False
     boxes: bool = True
     shift: bool = True
+    upload: bool = True
 
 
 def _pen(color: str, width: float = 2.0, dashed: bool = False) -> QPen:
@@ -67,6 +71,7 @@ class FrameView(QGraphicsView):
     geometryEdited = Signal(list)
     boxDrawn = Signal(QRectF)
     boxDeleteRequested = Signal(int)
+    uploadAreaDrawn = Signal(QRectF)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -83,6 +88,9 @@ class FrameView(QGraphicsView):
         self._align = None
         self._domain: tuple[float, float] | None = None
         self._boxes: list = []
+        self._upload = None
+        self._upload_limits = (32, 518400)
+        self._upload_item = None
         self._shift: tuple[int, int] | None = None
         self._drag_endpoint: int | None = None
         self._geometry_at_press: list[float] | None = None
@@ -107,6 +115,8 @@ class FrameView(QGraphicsView):
         self._strip = overlay["strip"]
         self._align = overlay["align"]
         self._domain = overlay.get("domain")
+        self._upload = overlay.get("upload")
+        self._upload_limits = tuple(overlay.get("upload_limits", self._upload_limits))
         self.redraw()
 
     def set_boxes(self, boxes: list) -> None:
@@ -162,6 +172,13 @@ class FrameView(QGraphicsView):
             rect = QGraphicsRectItem(QRectF(x0, y0, x1 - x0, y1 - y0))
             rect.setPen(_pen(ALIGN_COLOR, 1.5, dashed=True))
             group.addToGroup(rect)
+        self._upload_item = None
+        if self._upload and self.toggles.upload:
+            r = self._upload["roi"]
+            item = QGraphicsRectItem(QRectF(r["x"], r["y"], r["width"], r["height"]))
+            item.setPen(_pen(UPLOAD_COLOR, 2.0, dashed=r["source"] != "drawn"))
+            group.addToGroup(item)
+            self._upload_item = item
         if self.toggles.boxes:
             for box, edited, coverage in self._boxes:
                 color = CLASS_COLORS.get(box.coco_class, CLASS_COLORS["other"])
@@ -177,6 +194,9 @@ class FrameView(QGraphicsView):
             arrow.setPen(_pen(SHIFT_COLOR, 2.5))
             group.addToGroup(arrow)
             group.addToGroup(_text(f"shift dx {dx:+d} dy {dy:+d}", SHIFT_COLOR, cx + 8, cy + 8))
+
+    def upload_rect_item(self):
+        return self._upload_item
 
     def _line(self, v: list[float], color: str) -> QGraphicsLineItem:
         item = QGraphicsLineItem(v[0], v[1], v[2], v[3])
@@ -208,6 +228,12 @@ class FrameView(QGraphicsView):
                     self._drag_endpoint = k
                     return True
             return False
+        if self.tool is Tool.DRAW_UPLOAD:
+            self._rubber_start = _clamp(p)
+            self._rubber = QGraphicsRectItem(QRectF(self._rubber_start, self._rubber_start))
+            self._rubber.setPen(_pen(UPLOAD_COLOR, 2.0))
+            self.scene().addItem(self._rubber)
+            return True
         if self.tool is Tool.DRAW_BOX:
             self._rubber_start = _clamp(p)
             self._rubber = QGraphicsRectItem(QRectF(self._rubber_start, self._rubber_start))
@@ -229,6 +255,10 @@ class FrameView(QGraphicsView):
             self.redraw()
         elif self._rubber_start is not None and self._rubber is not None:
             self._rubber.setRect(QRectF(self._rubber_start, p).normalized())
+            if self.tool is Tool.DRAW_UPLOAD:
+                r = self._rubber.rect()
+                bad = rect_problem(r.x(), r.y(), r.width(), r.height(), *self._upload_limits)
+                self._rubber.setPen(_pen(INVALID_COLOR if bad else UPLOAD_COLOR, 2.0))
 
     def _release(self, p: QPointF) -> None:
         if self._drag_endpoint is not None:
@@ -242,7 +272,9 @@ class FrameView(QGraphicsView):
                 self.scene().removeItem(self._rubber)
             self._rubber = None
             self._rubber_start = None
-            if rect.width() >= MIN_BOX and rect.height() >= MIN_BOX:
+            if self.tool is Tool.DRAW_UPLOAD:
+                self.uploadAreaDrawn.emit(rect)
+            elif rect.width() >= MIN_BOX and rect.height() >= MIN_BOX:
                 self.boxDrawn.emit(rect)
 
     def mousePressEvent(self, event) -> None:

@@ -260,3 +260,33 @@ def test_reference_menu_has_no_rebuild_entry(window):
     ref_menu = next(a.menu() for a in window.menuBar().actions() if a.text() == "&Reference")
     assert not any("Rebuild" in a.text() for a in ref_menu.actions())
     assert not hasattr(window.verdict, "rebuild_btn")
+
+
+def test_upload_area_menu_heartbeat_and_sn(qtbot, tmp_path, window, monkeypatch):
+    from PySide6.QtCore import QRectF
+    from PySide6.QtWidgets import QMessageBox
+    img = tmp_path / "dry.png"
+    write_image(img, to_rgb(dry_gray()))
+    _open(qtbot, window, img)
+    monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: QMessageBox.Save)
+    window.upload_draw_action.trigger()
+    assert window.frame_view.tool is Tool.DRAW_UPLOAD
+    window.frame_view.uploadAreaDrawn.emit(QRectF(0, 0, 640, 480))
+    qtbot.waitUntil(lambda: window.session.upload_area == (0, 0, 640, 480))
+    window.upload_delete_action.trigger()
+    qtbot.waitUntil(lambda: window.session.upload_area is None)
+    window.verdict.heartbeat_spin.setValue(5)
+    qtbot.waitUntil(lambda: window.session.heartbeat_minutes == 5)
+    window.verdict.sn_edit.setText("CAM-9")
+    window.verdict.sn_edit.editingFinished.emit()
+    qtbot.waitUntil(lambda: window.session.sn == "CAM-9")
+
+
+def test_run_dialog_heartbeat(qtbot):
+    from floodsim.gui.main_window import RunDialog
+    from floodsim.modes import RunParams
+    d = RunDialog(RunParams(mode="device", heartbeat_minutes=7))
+    qtbot.addWidget(d)
+    assert d.heartbeat.value() == 7
+    d.heartbeat.setValue(0)
+    assert d.params().heartbeat_minutes == 0

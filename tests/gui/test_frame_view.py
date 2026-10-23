@@ -1,3 +1,4 @@
+import numpy as np
 import pytest
 from PySide6.QtCore import QPointF, QRectF
 from PySide6.QtWidgets import QGraphicsLineItem
@@ -116,3 +117,26 @@ def test_tool_switch_cancels_rubber_band(qtbot, view):
     with qtbot.assertNotEmitted(view.boxDrawn):
         view._release(QPointF(100, 100))
     assert view._rubber is None
+
+
+def test_upload_area_overlay_and_draw(qtbot):
+    from PySide6.QtCore import Qt
+    v = FrameView()
+    qtbot.addWidget(v)
+    v.set_image(np.zeros((1080, 1920, 3), np.uint8))
+    overlay = {"geometry": [560, 230, 1920, 355, 560, 378, 1920, 446],
+               "strip": (np.array([]), np.array([]), np.array([])),
+               "align": (0, 0, 0, 0), "domain": (560, 1920),
+               "upload": {"roi": {"x": 560, "y": 110, "width": 1360, "height": 360, "step": 1,
+                                  "source": "lines", "out_width": 1360, "out_height": 360},
+                          "drawn": None, "text": ""},
+               "upload_limits": [32, 518400]}
+    v.set_geometry_overlay(overlay)
+    assert v.upload_rect_item() is not None and v.upload_rect_item().pen().style() != Qt.SolidLine
+    v.set_tool(Tool.DRAW_UPLOAD)
+    with qtbot.waitSignal(v.uploadAreaDrawn) as sig:
+        assert v._press(QPointF(100, 100))
+        v._move(QPointF(740, 580))
+        v._release(QPointF(740, 580))
+    r = sig.args[0]
+    assert (round(r.x()), round(r.y()), round(r.width()), round(r.height())) == (100, 100, 640, 480)

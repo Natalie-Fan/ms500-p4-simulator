@@ -5,7 +5,7 @@ import datetime as dt
 
 from PySide6.QtCore import Signal
 from PySide6.QtWidgets import (QAbstractItemView, QButtonGroup, QFormLayout, QFrame, QLabel,
-                               QPushButton, QRadioButton, QTableWidget, QTableWidgetItem,
+                               QLineEdit, QPushButton, QRadioButton, QSpinBox, QTableWidget, QTableWidgetItem,
                                QVBoxLayout, QWidget)
 
 from ..report import format_value
@@ -79,6 +79,8 @@ def _veto(usable: bool, coverage: float, worst: str) -> str:
 
 
 class VerdictPanel(QWidget):
+    heartbeatChanged = Signal(int)
+    snChanged = Signal(str)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -110,6 +112,20 @@ class VerdictPanel(QWidget):
         self.reference_label = QLabel("none")
         self.firmware_label = QLabel(DASH)
         state.addRow("Since image", self.since_label)
+        self.heartbeat_spin = QSpinBox()
+        self.heartbeat_spin.setRange(0, 1440)
+        self.heartbeat_spin.setSuffix(" min")
+        self.heartbeat_spin.setValue(60)
+        self.heartbeat_spin.setToolTip("Flood Heartbeat Interval: minutes between dry-weather images; 0 = off")
+        self.heartbeat_spin.valueChanged.connect(self.heartbeatChanged)
+        self.sn_edit = QLineEdit("SIM")
+        self.sn_edit.setToolTip("Serial number used in upload file names")
+        self.sn_edit.editingFinished.connect(lambda: self.snChanged.emit(self.sn_edit.text().strip()))
+        self.upload_label = QLabel(DASH)
+        self.upload_label.setWordWrap(True)
+        state.addRow("Heartbeat", self.heartbeat_spin)
+        state.addRow("Serial number", self.sn_edit)
+        state.addRow("Upload area", self.upload_label)
         state.addRow("Gallery", self.reference_label)
         state.addRow("Firmware", self.firmware_label)
         layout.addLayout(state)
@@ -177,6 +193,9 @@ class VerdictPanel(QWidget):
 
     def show_state(self, since_image: int, heartbeat_every: int | None) -> None:
         self.since_label.setText(f"{since_image} / {heartbeat_every}" if heartbeat_every else str(since_image))
+
+    def show_upload(self, text: str) -> None:
+        self.upload_label.setText(text)
 
     def show_reference(self, status) -> None:
         self.reference_label.setText(status.description if status.ready else "none (set a dry reference)")
