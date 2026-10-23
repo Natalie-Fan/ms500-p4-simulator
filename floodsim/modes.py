@@ -142,8 +142,11 @@ class UploadWriter:
             heartbeat=heartbeat, id=upload_id, correlation=row["curb_correlation"],
             severity=row["severity"], slot=row["gallery_slot"], roi=roi,
             captured_at=int(local.timestamp()))
-        cv2.imwrite(str(self.dir / name), np.ascontiguousarray(crop[:, :, ::-1]),
-                    [cv2.IMWRITE_JPEG_QUALITY, 90])
+        # 原因：cv2.imwrite 在 Windows 上打不开非 ASCII 路径且只返回 False，所以先编码再用 tofile 写入
+        ok, buf = cv2.imencode(".jpg", np.ascontiguousarray(crop[:, :, ::-1]), [cv2.IMWRITE_JPEG_QUALITY, 90])
+        if not ok:
+            raise FloodSimError(f"cannot encode upload image {name}")
+        buf.tofile(str(self.dir / name))
         (self.dir / f"{name[:-4]}.json").write_text(desc + "\n", encoding="utf-8")
         return name
 

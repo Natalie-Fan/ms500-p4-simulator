@@ -63,6 +63,15 @@ def test_device_upload_uses_drawn_area(core, ref, tmp_path):
     assert jpg.name.startswith("SIM_flood_") and read_image_bgr(jpg).shape == (480, 640, 3)
 
 
+def test_upload_into_non_ascii_directory(core, ref, tmp_path):
+    out_dir = tmp_path / "上传测试"
+    uploads = UploadWriter(out_dir, core, clock=CLOCK)
+    out = run_device(core, _golden_source(), StaticBoxes({}), ref, RunParams(), uploads=uploads)
+    jpg = out_dir / "uploads" / out.rows[1]["upload_file"]
+    assert jpg.exists() and read_image_bgr(jpg).shape == (360, 1360, 3)
+    assert jpg.with_suffix(".json").exists()
+
+
 def test_upload_name_collision_gets_suffix(core, ref, tmp_path):
     src = MemorySource([(0.0, FLOOD), (0.2, FLOOD), (0.4, FLOOD)])
     uploads = UploadWriter(tmp_path, core, clock=CLOCK)
