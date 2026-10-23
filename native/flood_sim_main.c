@@ -20,6 +20,7 @@ typedef struct {
     const char *frames, *boxes, *geometry, *mode;
     double period, retry_gap, fps;
     int every;
+    int heartbeat_every;
 } options_t;
 
 static void usage(void)
@@ -27,7 +28,7 @@ static void usage(void)
     fputs("usage: flood_sim --reference dry.pgm [--reference dusk.pgm ...] --frames <dir|list>\n"
           "                 [--boxes boxes.csv]\n"
           "                 [--geometry geo.json] [--mode device|dense] [--period 60]\n"
-          "                 [--retry-gap 1] [--every 1] [--fps 1]\n", stderr);
+          "                 [--retry-gap 1] [--every 1] [--fps 1] [--heartbeat-every 60]\n", stderr);
 }
 
 static int parse_args(int argc, char **argv, options_t *o)
@@ -38,6 +39,7 @@ static int parse_args(int argc, char **argv, options_t *o)
     o->retry_gap = 1.0;
     o->fps = 1.0;
     o->every = 1;
+    o->heartbeat_every = sim_heartbeat_every();
     for (int i = 1; i < argc; i += 2) {
         const char *a = argv[i];
         const char *v = i + 1 < argc ? argv[i + 1] : NULL;
@@ -57,6 +59,7 @@ static int parse_args(int argc, char **argv, options_t *o)
         else if (!strcmp(a, "--retry-gap")) o->retry_gap = atof(v);
         else if (!strcmp(a, "--every")) o->every = atoi(v);
         else if (!strcmp(a, "--fps")) o->fps = atof(v);
+        else if (!strcmp(a, "--heartbeat-every")) o->heartbeat_every = atoi(v);
         else { fprintf(stderr, "unknown option %s\n", a); return 0; }
     }
     if (!o->n_references || !o->frames) { fputs("--reference and --frames are required\n", stderr); return 0; }
@@ -64,8 +67,8 @@ static int parse_args(int argc, char **argv, options_t *o)
         fputs("--mode must be device or dense\n", stderr);
         return 0;
     }
-    if (o->period <= 0 || o->retry_gap < 0 || o->every < 1 || o->fps <= 0) {
-        fputs("--period and --fps must be > 0, --retry-gap >= 0, --every >= 1\n", stderr);
+    if (o->period <= 0 || o->retry_gap < 0 || o->every < 1 || o->fps <= 0 || o->heartbeat_every < 0) {
+        fputs("--period and --fps must be > 0, --retry-gap >= 0, --every >= 1, --heartbeat-every >= 0\n", stderr);
         return 0;
     }
     return 1;
@@ -177,6 +180,7 @@ int main(int argc, char **argv)
     if (strcmp(o.mode, "device") == 0) {
         void *dev = sim_device_new();
         if (!dev) return fail("out of memory");
+        sim_device_set_heartbeat(dev, o.heartbeat_every);
         provider_ctx_t ctx = { frames, n, boxes, n_boxes, { 0.0, 0.0 } };
         const double last_t = frames[n - 1].t_sec;
         for (int k = 0;; ++k) {

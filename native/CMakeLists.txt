@@ -21,8 +21,11 @@ file(WRITE "${CMAKE_BINARY_DIR}/firmware_dir.txt" "${FIRMWARE_DIR}")
 # picks up added/renamed firmware .c files on the next build.
 file(GLOB FLOOD_SOURCES CONFIGURE_DEPENDS "${FLOOD_DIR}/*.c")
 
-add_library(flood_objs OBJECT ${FLOOD_SOURCES} sim_shim.c)
-target_include_directories(flood_objs PUBLIC ${FLOOD_DIR} ${CMAKE_CURRENT_SOURCE_DIR})
+# Upload name/description (flood_upload_meta.c) lives in the firmware's main/, not the shared
+# component; it is compiled in place too. native/ supplies the sdkconfig.h it includes.
+set(FLOOD_META_DIR "${FIRMWARE_DIR}/main/ai_process")
+add_library(flood_objs OBJECT ${FLOOD_SOURCES} ${FLOOD_META_DIR}/flood_upload_meta.c sim_shim.c)
+target_include_directories(flood_objs PUBLIC ${FLOOD_DIR} ${FLOOD_META_DIR} ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_options(flood_objs PRIVATE -O2 -Wall)
 set_target_properties(flood_objs PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
@@ -70,3 +73,7 @@ add_test(NAME bad_geometry_rejected
          COMMAND flood_sim --reference ${FIX}/reference.pgm --frames ${FIX}/frames
                  --geometry ${FIX}/bad_geometry.json)
 set_tests_properties(bad_geometry_rejected PROPERTIES WILL_FAIL TRUE FIXTURES_REQUIRED sim_fixtures)
+
+add_test(NAME heartbeat_every_negative_rejected
+         COMMAND flood_sim --reference ${FIX}/reference.pgm --frames ${FIX}/frames --heartbeat-every -1)
+set_tests_properties(heartbeat_every_negative_rejected PROPERTIES WILL_FAIL TRUE FIXTURES_REQUIRED sim_fixtures)

@@ -27,7 +27,8 @@ static void test_abi_and_names(void)
     CHECK(sim_submerged_below() == 0.45f);
     CHECK(sim_veto_threshold() == 0.15f);
     CHECK(sim_sample_period_s() == 60.0f);
-    CHECK(sim_upload_downscale() == 2);
+    CHECK(sim_upload_max_pixels() == 518400);
+    CHECK(sim_upload_min_side() == 32);
 }
 
 static void test_gray(void)
@@ -660,6 +661,105 @@ static void test_band_coverage(void)
     CHECK(sim_heartbeat_every() == 60);
 }
 
+static void test_upload_roi(void)
+{
+    int32_t roi[8];
+    float d[8];
+    sim_default_geometry(d);
+    sim_set_geometry(d);
+
+    sim_upload_roi(NULL, roi);                      /* default lines: 1360x360, full resolution */
+    CHECK(roi[0] == 560 && roi[1] == 110 && roi[2] == 1360 && roi[3] == 360);
+    CHECK(roi[4] == 1 && roi[5] == 1 && roi[6] == 1360 && roi[7] == 360);
+
+    const int32_t drawn[4] = { 100, 100, 640, 480 };
+    CHECK(sim_upload_rect_valid(drawn) == 1);
+    sim_upload_roi(drawn, roi);
+    CHECK(roi[0] == 100 && roi[1] == 100 && roi[2] == 640 && roi[3] == 480);
+    CHECK(roi[4] == 1 && roi[5] == 0 && roi[6] == 640 && roi[7] == 480);
+
+    const int32_t outside[4] = { 1900, 0, 100, 100 };   /* invalid: falls back to the lines */
+    CHECK(sim_upload_rect_valid(outside) == 0);
+    sim_upload_roi(outside, roi);
+    CHECK(roi[5] == 1 && roi[2] == 1360);
+
+    float upside_down[8];                           /* lane above curb: whole frame at half size */
+    memcpy(upside_down, d, sizeof d);
+    upside_down[5] = 100.0f; upside_down[7] = 100.0f;
+    sim_set_geometry(upside_down);
+    sim_upload_roi(NULL, roi);
+    CHECK(roi[5] == 2 && roi[4] == 2 && roi[6] == 960 && roi[7] == 536);
+    sim_set_geometry(d);
+}
+
+static void test_upload_crop(void)
+{
+    uint8_t *rgb = malloc((size_t)SIM_FRAME_W * SIM_FRAME_H * 3);
+    uint8_t *out = malloc(64 * 64 * 3);
+    if (!rgb || !out) { ++g_failures; free(rgb); free(out); return; }
+    for (int y = 0; y < SIM_FRAME_H; ++y)
+        for (int x = 0; x < SIM_FRAME_W; ++x) {
+            uint8_t *p = rgb + ((size_t)y * SIM_FRAME_W + x) * 3;
+            p[0] = (uint8_t)x; p[1] = (uint8_t)y; p[2] = (uint8_t)(x + y);
+        }
+    const int32_t drawn[4] = { 8, 16, 64, 64 };
+    int32_t roi[8];
+    sim_upload_roi(drawn, roi);
+    sim_upload_crop(rgb, roi, out);
+    CHECK(out[0] == 8 && out[1] == 16);                         /* top-left = frame (8,16) */
+    CHECK(out[(63 * 64 + 63) * 3] == (uint8_t)71 && out[(63 * 64 + 63) * 3 + 1] == (uint8_t)79);
+    free(rgb);
+    free(out);
+}
+
+static void test_upload_meta(void)
+{
+    char buf[512];
+    CHECK(sim_upload_filename(buf, sizeof buf, "SN1", 1, 2026, 10, 22, 21, 46, 12) > 0);
+    CHECK(strcmp(buf, "SN1_flood_hb_20261022_214612.jpg") == 0);
+    CHECK(sim_upload_filename(buf, sizeof buf, "SN1", 0, 2026, 10, 22, 22, 1, 33) > 0);
+    CHECK(strcmp(buf, "SN1_flood_20261022_220133.jpg") == 0);
+
+    float d[8];
+    int32_t roi[8];
+    sim_default_geometry(d);
+    sim_set_geometry(d);
+    sim_upload_roi(NULL, roi);
+    CHECK(sim_upload_description(buf, sizeof buf, 0, "00000A", 0.312f, "minor", 0, roi,
+                                 1792731693LL) < (int32_t)sizeof buf);
+    CHECK(strcmp(buf,
+        "{\"purpose\":\"flood_detection\",\"kind\":\"flood\",\"id\":\"00000A\",\"correlation\":0.312,"
+        "\"severity\":\"minor\",\"slot\":0,\"roi\":{\"x\":560,\"y\":110,\"width\":1360,\"height\":360},"
+        "\"step\":1,\"roi_source\":\"lines\",\"source_frame\":{\"width\":1920,\"height\":1080},"
+        "\"captured_at\":1792731693}") == 0);
+    CHECK(sim_upload_description(buf, sizeof buf, 1, "00000B", NAN, "none", -1, roi, 0) > 0);
+    CHECK(strstr(buf, "\"kind\":\"heartbeat\"") && strstr(buf, "\"correlation\":null"));
+}
+
+static void test_heartbeat_setting(void)
+{
+    sim_result_t r;
+    void *ref = sim_gallery_new();
+    void *dev = sim_device_new();
+    sim_gallery_add_manual(ref, g_dry);
+    script_t clear = { { g_dry, g_dry }, { 0, 0 }, { 0, 1 }, 0 };
+
+    sim_device_set_heartbeat(dev, 0);                  /* off */
+    for (int i = 0; i < 130; ++i) {
+        sim_device_sample(dev, ref, scripted, &clear, &r);
+        CHECK(r.outcome == 1);
+    }
+    sim_device_set_heartbeat(dev, 1);                  /* every dry reading */
+    sim_device_sample(dev, ref, scripted, &clear, &r);
+    CHECK(r.outcome == 3);
+    sim_device_reset(dev);                             /* reset keeps the setting */
+    sim_device_sample(dev, ref, scripted, &clear, &r);
+    CHECK(r.outcome == 3);
+
+    sim_device_free(dev);
+    sim_gallery_free(ref);
+}
+
 int main(void)
 {
     g_dry = malloc((size_t)SYNTH_W * SYNTH_H);
@@ -694,6 +794,10 @@ int main(void)
     test_rebuild_absent_none_and_errors();
     test_learning_switch();
     test_band_coverage();
+    test_upload_roi();
+    test_upload_crop();
+    test_upload_meta();
+    test_heartbeat_setting();
 
     free(g_dry);
     free(g_flood);

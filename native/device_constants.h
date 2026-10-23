@@ -32,7 +32,10 @@
  * (needs flood_geometry.h included first). */
 #define SIM_GEOMETRY_MIN_DOMAIN_WIDTH (FLOOD_STRIP_OFFSET + 40.0f)
 
-/* main/bsp_video/flood_roi.h:38  FLOOD_ROI_DOWNSCALE */
-#define SIM_UPLOAD_DOWNSCALE 2
+/* Uploads: the crop comes from the firmware's flood_upload_roi.c (compiled, not mirrored).
+ * Heartbeat: main/ai_process/flood_task.c:342 sets heartbeat_every to
+ * minutes * 60000 / FLOOD_SAMPLE_PERIOD_MS before each reading; minutes is the Device Manager
+ * setting, main/as_dm/dm_flood_settings.h (0-1440, default 60, 0 = off). floodsim applies the
+ * same formula with the run's sample period (floodsim/modes.py heartbeat_readings). */
 
 #endif /* DEVICE_CONSTANTS_H */

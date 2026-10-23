@@ -12,7 +12,7 @@
 #define SIM_API
 #endif
 
-#define SIM_ABI_VERSION        4
+#define SIM_ABI_VERSION        5
 #define SIM_FRAME_W            1920
 #define SIM_FRAME_H            1080
 #define SIM_MAX_BOXES          32     /* FLOOD_VETO_MAX_BOXES */
@@ -75,7 +75,6 @@ SIM_API const char *sim_class_name(int32_t cls);
 SIM_API float       sim_submerged_below(void);
 SIM_API float       sim_veto_threshold(void);
 SIM_API float       sim_sample_period_s(void);
-SIM_API int32_t     sim_upload_downscale(void);
 
 /* ---- geometry ---- */
 SIM_API void    sim_default_geometry(float *out8);
@@ -131,6 +130,22 @@ SIM_API int32_t sim_score(const void *gallery, const uint8_t *gray, const sim_bo
 SIM_API float   sim_band_coverage(const sim_box_t *box);
 SIM_API int32_t sim_heartbeat_every(void);
 
+/* ---- uploads (firmware flood_upload_roi.c / flood_upload_meta.c) ---- */
+/* drawn4 = {x,y,w,h} or NULL (derive from the lines). out8 = {x,y,w,h,step,source,out_w,out_h};
+ * source 0 drawn, 1 lines, 2 full. Uses the current geometry. */
+SIM_API void    sim_upload_roi(const int32_t *drawn4, int32_t *out8);
+SIM_API int32_t sim_upload_rect_valid(const int32_t *rect4);
+/* rgb24 is 1920x1080x3; out holds out_w*out_h*3 bytes. */
+SIM_API void    sim_upload_crop(const uint8_t *rgb24, const int32_t *roi8, uint8_t *out);
+SIM_API int32_t sim_upload_filename(char *out, int32_t size, const char *sn, int32_t heartbeat,
+                                    int32_t year, int32_t month, int32_t day,
+                                    int32_t hour, int32_t minute, int32_t second);
+SIM_API int32_t sim_upload_description(char *out, int32_t size, int32_t heartbeat, const char *id,
+                                       float correlation, const char *severity, int32_t slot,
+                                       const int32_t *roi8, int64_t captured_at);
+SIM_API int32_t sim_upload_max_pixels(void);
+SIM_API int32_t sim_upload_min_side(void);
+
 /* ---- device loop (Task 2) ---- */
 SIM_API void *sim_device_new(void);
 SIM_API void  sim_device_free(void *dev);
@@ -141,6 +156,9 @@ SIM_API void  sim_device_forget_candidate(void *dev);
 /* flood_task.c pauses learning while the gallery is stale: when off, samples pass no learner
  * (and switching off drops a pending candidate). On by default. */
 SIM_API void  sim_device_set_learning(void *dev, int32_t on);
+/* heartbeat_every in readings (0 = off), kept across sim_device_reset() and applied
+ * before every reading, as flood_task.c:342 does. */
+SIM_API void  sim_device_set_heartbeat(void *dev, int32_t every);
 /* One firmware sampling cycle; may admit an AUTO reference into `gallery`. */
 SIM_API void  sim_device_sample(void *dev, void *gallery, sim_provider_fn provider,
                                 void *user, sim_result_t *out);

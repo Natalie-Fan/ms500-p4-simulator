@@ -5,12 +5,15 @@
 #include "flood_gallery.h"
 #include "flood_geometry.h"
 #include "flood_veto.h"
+#include "flood_upload_roi.h"
+#include "flood_upload_meta.h"
 #include "device_constants.h"
 
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 /* The firmware core reads scene geometry through this extern. On device it is
  * defined in main/ai_process/flood_geometry_config.c; here the simulator owns
@@ -52,7 +55,6 @@ const char *sim_class_name(int32_t cls)
 float   sim_submerged_below(void)  { return FLOOD_SUBMERGED_BELOW; }
 float   sim_veto_threshold(void)   { return FLOOD_VETO_THRESHOLD; }
 float   sim_sample_period_s(void)  { return SIM_SAMPLE_PERIOD_S; }
-int32_t sim_upload_downscale(void) { return SIM_UPLOAD_DOWNSCALE; }
 
 /* ---------------------------------------------------------------- geometry */
 
@@ -370,12 +372,14 @@ typedef struct {
     void           *user;
     flood_gallery_learner_t *learner;   /* pending learning candidate, like flood_task.c's */
     int32_t learning;   /* flood_task.c: no learning while the gallery is stale */
+    int32_t heartbeat_every;
 } sim_device_t;
 
 void *sim_device_new(void)
 {
     sim_device_t *d = calloc(1, sizeof(*d));
     if (!d) return NULL;
+    d->heartbeat_every = FLOOD_HEARTBEAT_EVERY;
     d->gray = malloc((size_t)SIM_FRAME_W * SIM_FRAME_H);
     if (!d->gray) { free(d); return NULL; }
     d->learner = malloc(sizeof(*d->learner));
@@ -398,7 +402,11 @@ void sim_device_free(void *dev)
 void sim_device_reset(void *dev)
 {
     sim_device_t *d = dev;
-    if (d) { flood_capture_init(&d->capture); flood_gallery_learner_init(d->learner); }
+    if (d) {
+        flood_capture_init(&d->capture);
+        d->capture.heartbeat_every = d->heartbeat_every;   /* the setting survives a reset */
+        flood_gallery_learner_init(d->learner);
+    }
 }
 
 void sim_device_forget_candidate(void *dev)
@@ -413,6 +421,14 @@ void sim_device_set_learning(void *dev, int32_t on)
     if (!d) return;
     d->learning = on ? 1 : 0;
     if (!on) flood_gallery_learner_init(d->learner);
+}
+
+void sim_device_set_heartbeat(void *dev, int32_t every)
+{
+    sim_device_t *d = dev;
+    if (!d) return;
+    d->heartbeat_every = every < 0 ? 0 : every;
+    d->capture.heartbeat_every = d->heartbeat_every;
 }
 
 /* flood_grab_fn: attempt N of flood_capture_sample() asks the provider for
@@ -466,6 +482,7 @@ void sim_device_sample(void *dev, void *gallery, sim_provider_fn provider, void 
         return;
     }
 
+    d->capture.heartbeat_every = d->heartbeat_every;   /* flood_task.c:342 */
     d->attempt = 0;
     d->last_frame_idx = -1;
     d->last_veto.usable = true;
@@ -507,4 +524,64 @@ void sim_device_sample(void *dev, void *gallery, sim_provider_fn provider, void 
     }
     out->gallery_count = sim_gallery_count(g);
     out->candidate_pending = d->learner->pending ? 1 : 0;
+}
+
+/* ----------------------------------------------------------------- uploads */
+
+static flood_upload_roi_t roi_from_array(const int32_t *a)
+{
+    flood_upload_roi_t r;
+    r.rect = (flood_rect_t){ a[0], a[1], a[2], a[3] };
+    r.step = a[4];
+    r.source = (flood_upload_src_t)a[5];
+    return r;
+}
+
+int32_t sim_upload_max_pixels(void) { return FLOOD_UPLOAD_ROI_MAX_PIXELS; }
+int32_t sim_upload_min_side(void)   { return FLOOD_UPLOAD_ROI_MIN_SIDE; }
+
+int32_t sim_upload_rect_valid(const int32_t *rect4)
+{
+    if (!rect4) return 0;
+    const flood_rect_t r = { rect4[0], rect4[1], rect4[2], rect4[3] };
+    return flood_upload_rect_valid(&r) ? 1 : 0;
+}
+
+void sim_upload_roi(const int32_t *drawn4, int32_t *out8)
+{
+    flood_rect_t drawn;
+    if (drawn4) drawn = (flood_rect_t){ drawn4[0], drawn4[1], drawn4[2], drawn4[3] };
+    const flood_upload_roi_t r = flood_upload_roi_compute(drawn4 ? &drawn : NULL);
+    out8[0] = r.rect.x; out8[1] = r.rect.y; out8[2] = r.rect.width; out8[3] = r.rect.height;
+    out8[4] = r.step; out8[5] = (int32_t)r.source;
+    out8[6] = flood_upload_roi_out_w(&r); out8[7] = flood_upload_roi_out_h(&r);
+}
+
+void sim_upload_crop(const uint8_t *rgb24, const int32_t *roi8, uint8_t *out)
+{
+    if (!rgb24 || !roi8 || !out) return;
+    const flood_upload_roi_t r = roi_from_array(roi8);
+    flood_upload_roi_copy(rgb24, SIM_FRAME_W, &r, out);
+}
+
+int32_t sim_upload_filename(char *out, int32_t size, const char *sn, int32_t heartbeat,
+                            int32_t year, int32_t month, int32_t day,
+                            int32_t hour, int32_t minute, int32_t second)
+{
+    struct tm local;
+    memset(&local, 0, sizeof local);
+    local.tm_year = year - 1900; local.tm_mon = month - 1; local.tm_mday = day;
+    local.tm_hour = hour; local.tm_min = minute; local.tm_sec = second;
+    return flood_upload_filename(out, (size_t)size, sn, heartbeat != 0, &local);
+}
+
+int32_t sim_upload_description(char *out, int32_t size, int32_t heartbeat, const char *id,
+                               float correlation, const char *severity, int32_t slot,
+                               const int32_t *roi8, int64_t captured_at)
+{
+    const flood_upload_meta_t m = {
+        .heartbeat = heartbeat != 0, .id = id, .correlation = correlation, .severity = severity,
+        .slot = slot, .roi = roi_from_array(roi8), .captured_at = (long long)captured_at,
+    };
+    return flood_upload_description(out, (size_t)size, &m);
 }
