@@ -48,7 +48,7 @@ learns. On the command line every run starts from the manual references only. In
 run also starts from them, then the session keeps the gallery it ended with, so later dense runs,
 Score and the verdict use what was learned (Reset state drops it).
 
-Uploads match the October 2026 firmware: each `upload` or `heartbeat` writes `uploads/<SN>_flood[_hb]_YYYYMMDD_HHMMSS.jpg`, the crop the camera sends (a drawn `--upload-area`, else derived from the curb/lane lines), and a `.json` beside it with the camera's description. Names and descriptions come from the firmware's own `flood_upload_meta.c`. The JPEG is OpenCV quality 90, so it is not byte-identical to the camera's. Times are the clip's real start (`record_YYYYMMDD_HHMMSS`) or the input's modified time, plus the video offset. `samples.csv` names each upload in `upload_file`. `--heartbeat` is in minutes (0 = off, default 60) and is converted to readings with `--period`, as the camera converts it with its 60 s period.
+Uploads match the October 2026 firmware: each `upload` or `heartbeat` writes `uploads/<SN>_flood[_hb]_YYYYMMDD_HHMMSS.jpg`, the crop the camera sends (a drawn `--upload-area`, else derived from the curb/lane lines), and a `.json` beside it with the camera's description. Names and descriptions come from the firmware's own `flood_upload_meta.c`. The JPEG is OpenCV quality 90, so it is not byte-identical to the camera's. Times are the clip's real start (`record_YYYYMMDD_HHMMSS`) or the input's modified time, plus the video offset. `samples.csv` names each upload in `upload_file`. `--heartbeat` is in minutes (0 = off, default 60) and is converted to readings with `--period`, as the camera converts it with its 60 s period. Heartbeats follow video time, so on a short clip with a short `--period` use e.g. `--heartbeat 1` to see them. Runs made before this change at periods other than 60 s differ on heartbeat rows.
 
 A folder of `record_YYYYMMDD_HHMMSS` videos opens as one timeline at the clips' real start times.
 Device checks that fall between clips are skipped (counted in `summary.txt`), the gallery carries
@@ -92,7 +92,7 @@ correlation-over-time plot aligned with the scrubber (bottom; click it to jump) 
 when those files change. The upload crop and names are compiled from `flood_upload_roi.c` and
 `flood_upload_meta.c`. The heartbeat formula is mirrored from `flood_task.c:342`.
 
-`flood_sim.exe` also takes `--heartbeat-every N` (readings between heartbeats, 0 = off).
+`flood_sim.exe` also takes `--heartbeat-every N` (readings between heartbeats, 0 = off). To match a Python device run, pass the `heartbeat.readings` value from its `run.json`.
 
 ## Tests
 

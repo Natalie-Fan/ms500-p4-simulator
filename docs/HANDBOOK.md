@@ -325,7 +325,7 @@ floodsim run INPUT [--mode device|dense] [--reference IMG ...] [--reference-at S
 | `--labels` | Score the results against ground truth (§7) |
 | `--out` | Output folder. The default is `out/<input>-<mode>-<timestamp>`. It must not already contain files. |
 | `--period`, `--retry-gap` | Device mode timing. `--period` defaults to the firmware's 60 s; shorten it to get more samples (and more reference learning) out of a short clip. |
-| `--heartbeat` | Device mode: heartbeat interval in minutes, 0 to 1440. 0 turns it off. The default is 60. It is converted to readings with `--period`, as the camera does with its 60 s period. |
+| `--heartbeat` | Device mode: heartbeat interval in minutes, 0 to 1440. 0 turns it off. The default is 60. It is converted to readings with `--period`, as the camera does with its 60 s period. Heartbeats follow video time, so on a short clip with a short `--period` use e.g. `--heartbeat 1` to see them. Runs made before this change at periods other than 60 s differ on heartbeat rows. |
 | `--upload-area` | Device mode: the drawn upload area, either `x,y,w,h` (whole numbers) or a JSON file from the camera's `GET /api/flood/upload_roi`. A value that is not `x,y,w,h` or a `.json` file stops the run with an error. An area that breaks the firmware rules (sides of at least 32 px, inside 1920×1080, at most 518400 px) gives a warning, and the run uses the curb/lane lines, as the camera would. |
 | `--sn` | Device mode: serial number used in upload file names. The default is `SIM`. |
 | `--every` | Dense mode: score every Nth frame |
@@ -402,8 +402,8 @@ floodsim compare out/some-python-run out/exe.jsonl        # expect 0 differences
 
 Options: `--reference R.pgm [--reference R2.pgm ...] --frames DIR|LIST [--boxes B.csv] [--geometry G.json]
 [--mode device|dense] [--period 60] [--retry-gap 1] [--every 1] [--fps 1] [--heartbeat-every 60]`.
-`--heartbeat-every` is the number of readings between heartbeats; 0 turns them off.
-It prints one JSON line per sample, with the same fields as `samples.csv`. It reads only 1920×1080
+`--heartbeat-every` is the number of readings between heartbeats; 0 turns them off. To match a Python device run, pass the `heartbeat.readings` value from its `run.json`.
+It prints one JSON line per sample, with the same fields as `samples.csv` except `upload_file` (the exe writes no uploads). It reads only 1920×1080
 PGM frames and does no video decoding and no detection. Keep its paths ASCII.
 
 ---
