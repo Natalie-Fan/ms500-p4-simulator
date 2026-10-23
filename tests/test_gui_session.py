@@ -103,7 +103,7 @@ def test_device_batch_export_writes_uploads(session, tmp_path):
     res = session.run_batch(RunParams(mode="device", period=60.0))
     assert [r["outcome"] for r in res["rows"]] == ["clear", "upload"]
     out = Path(session.export_run(tmp_path / "run"))
-    assert len(list((out / "uploads").iterdir())) == 1
+    assert len(list((out / "uploads").glob("*.jpg"))) == 1
 
 
 def test_dense_batch_needs_reference(session):
@@ -428,3 +428,77 @@ def test_replacing_the_gallery_keeps_the_heartbeat_count(core, build_info, tmp_p
     assert s.sample(0)["since_image"] == 3
     s.run_batch(RunParams(mode="device", period=60.0))
     assert s.sample(0)["since_image"] == 4
+
+
+from floodsim.upload_area import upload_area_path
+
+
+def test_upload_area_save_reload_delete(session, core, build_info, folder):
+    overlay = session.set_upload_area((0, 0, 640, 480))
+    assert overlay["upload"]["roi"]["source"] == "drawn"
+    assert upload_area_path(folder).exists()
+    again = Session(core, build_info)
+    again.open(folder, no_detector=True)
+    assert again.upload_area == (0, 0, 640, 480)
+    session.set_upload_area(None)
+    assert not upload_area_path(folder).exists()
+    assert session.upload_status()["roi"]["source"] == "lines"
+
+
+def test_upload_area_rejects_invalid(session):
+    with pytest.raises(FloodSimError, match="upload area"):
+        session.set_upload_area((1900, 0, 100, 100))
+
+
+def test_line_move_changes_derived_area(session):
+    before = session.upload_status()["roi"]
+    g = session.geometry.to_list()
+    g[1] -= 50.0; g[3] -= 50.0                     # curb line up 50 px
+    session.set_geometry(Geometry.from_list(g))
+    after = session.upload_status()["roi"]
+    assert after["source"] == "lines" and after["y"] < before["y"]
+
+
+def test_heartbeat_field_reaches_manual_sample(session):
+    session.set_reference_frame(0)
+    session.set_heartbeat(1)                       # 1 min @ 60 s device period = every reading
+    assert session.overlay_geometry()["heartbeat_every"] == 1
+    assert session.sample(0)["outcome"] == "heartbeat"
+    session.reset_device()
+    assert session.sample(0)["outcome"] == "heartbeat"     # Reset state keeps the setting
+    with pytest.raises(FloodSimError):
+        session.set_heartbeat(1441)
+
+
+def test_sn_field(session):
+    assert session.set_sn("CAM-7") == "CAM-7"
+    with pytest.raises(FloodSimError):
+        session.set_sn("bad sn")
+    assert session.sn == "CAM-7"
+
+
+def test_export_matches_cli_names(session, tmp_path):
+    session.set_reference_frame(0)
+    session.set_sn("CAM-7")
+    session.set_upload_area((0, 0, 640, 480))
+    session.run_batch(RunParams(mode="device", period=60.0, heartbeat_minutes=0))
+    out = Path(session.export_run(tmp_path / "exp"))
+    info = json.loads((out / "run.json").read_text())
+    assert info["sn"] == "CAM-7" and info["upload_area_used"]["source"] == "drawn"
+    assert info["heartbeat"] == {"minutes": 0, "readings": 0}
+    rows = read_samples(out)
+    names = [r["upload_file"] for r in rows if r["upload_file"]]
+    assert names and all(n.startswith("CAM-7_flood_") for n in names)
+    assert all((out / "uploads" / n).exists() for n in names)
+
+
+def test_export_uses_run_geometry(session, tmp_path):
+    session.set_reference_frame(0)
+    session.run_batch(RunParams(mode="device", period=60.0))
+    used = session.upload_status()["roi"]
+    g = session.geometry.to_list()
+    g[1] -= 50.0; g[3] -= 50.0
+    session.set_geometry(Geometry.from_list(g))     # edit after the run
+    out = Path(session.export_run(tmp_path / "exp"))
+    assert json.loads((out / "run.json").read_text())["upload_area_used"] == used
+    assert session.upload_status()["roi"] != used    # the session keeps the edited lines

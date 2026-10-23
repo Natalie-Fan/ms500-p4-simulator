@@ -14,8 +14,10 @@ from ..errors import FloodSimError
 from ..geometry import Geometry
 from ..labels import Labels, score_rows
 from ..modes import (FrameFeeder, RunOutput, RunParams, UploadWriter, device_row, run_dense,
-                     run_device, sample_device_at)
+                     heartbeat_readings, make_clock, run_device, sample_device_at,
+                     upload_run_info)
 from ..report import make_run_info, prepare_out_dir, summarize, write_run
+from ..upload_area import check_sn, load_upload_area, save_upload_area, upload_area_path
 from ..results import DENSE_FIELDS, DEVICE_FIELDS, ScoreResult
 from ..source import Normalizer, open_source, read_image_bgr
 
@@ -72,6 +74,8 @@ class RunRecord:
     geometry: Geometry
     reference: dict
     boxes: dict
+    upload_area: tuple | None = None
+    sn: str = "SIM"
 
 
 @dataclass(frozen=True)
@@ -103,6 +107,10 @@ class Session:
         self.manual_slots: list[int] = []   # gallery slot of each manual_refs entry, same order
         self.ref_version: int | None = None
         self.device = core.new_device()
+        self.heartbeat_minutes = 60
+        self.sn = "SIM"
+        self.upload_area: tuple | None = None
+        self.device.set_heartbeat(heartbeat_readings(self.heartbeat_minutes, core.sample_period_s()))
         self.dense_cache: dict[int, ScoreResult] = {}
         self.manual_rows: list[dict] = []
         self.run: RunRecord | None = None
@@ -145,6 +153,7 @@ class Session:
                 if info["kind"] == "frame":
                     info.setdefault("input", str(self.source.path))
         self.source = src
+        self.upload_area = load_upload_area(upload_area_path(src.path))
         self.boxes = LenientBoxes(inner)
         self.labels = None
         self.labels_path = None
@@ -333,8 +342,40 @@ class Session:
                 "align": self.core.align_patch(), "domain": self.core.domain(),
                 "submerged_below": self.core.submerged_below(),
                 "veto_threshold": self.core.veto_threshold(),
-                "heartbeat_every": self.core.heartbeat_every(),
+                "heartbeat_every": heartbeat_readings(self.heartbeat_minutes,
+                                                      self.core.sample_period_s()),
+                "upload": self.upload_status(), "upload_limits": list(self.core.upload_limits()),
                 "sample_period_s": self.core.sample_period_s()}
+
+    # ------------------------------------------------------- uploads
+    def upload_status(self) -> dict:
+        roi = self.core.upload_roi(self.upload_area)
+        names = {"drawn": "drawn", "lines": "from lines", "full": "whole frame"}
+        scale = "full resolution" if roi.step == 1 else f"1/{roi.step} size"
+        return {"roi": roi.as_dict(), "drawn": self.upload_area,
+                "text": f"{names[roi.source]}, {roi.out_width}×{roi.out_height}, {scale}"}
+
+    def set_upload_area(self, rect) -> dict:
+        src = self._src()
+        if rect is not None:
+            rect = tuple(int(round(v)) for v in rect)
+            if not self.core.upload_rect_valid(rect):
+                lo, hi = self.core.upload_limits()
+                raise FloodSimError(f"upload area must have sides of at least {lo} px, lie inside "
+                                    f"1920x1080 and cover at most {hi} px")
+        save_upload_area(upload_area_path(src.path), rect)
+        self.upload_area = rect
+        return self.overlay_geometry()
+
+    def set_heartbeat(self, minutes: int) -> dict:
+        readings = heartbeat_readings(int(minutes), self.core.sample_period_s())
+        self.heartbeat_minutes = int(minutes)
+        self.device.set_heartbeat(readings)
+        return self.overlay_geometry()
+
+    def set_sn(self, sn: str) -> str:
+        self.sn = check_sn(sn)
+        return self.sn
 
     # --------------------------------------------------------------- boxes
     def set_boxes(self, idx: int, boxes: list[CachedBox]) -> None:
@@ -408,7 +449,8 @@ class Session:
         if self.reference is not None:
             reference["rebuilt_for_run"] = rebuilt
         self.run = RunRecord(params, out, self.geometry, reference,
-                             {**self.boxes.description, "frames_without_boxes": missing})
+                             {**self.boxes.description, "frames_without_boxes": missing},
+                             upload_area=self.upload_area, sn=self.sn)
         return {"mode": params.mode, "rows": [dict(r) for r in out.rows],
                 "cancelled": out.cancelled, "decode_failures": out.decode_failures,
                 "reference_rebuilt": rebuilt, "frames_without_boxes": missing,
@@ -456,18 +498,30 @@ class Session:
         if self.labels is not None:
             fields.append("label")
             score = score_rows(result.rows, params.mode)
+        rows = [dict(r) for r in result.rows]
         if params.mode == "device":
-            uploads = UploadWriter(out, self.core.upload_downscale())
-            for row in result.rows:
-                if row["outcome"] in ("upload", "heartbeat") and row["frame_idx"] >= 0:
-                    rgb = src.read_rgb(row["frame_idx"])
-                    if rgb is not None:
-                        uploads.write(row["sample"], rgb)
+            uploads = UploadWriter(out, self.core, drawn=run.upload_area, sn=run.sn,
+                                   clock=make_clock(src, src.path))
+            self.core.set_geometry(run.geometry)          # crop with the lines the run used
+            try:
+                for row in rows:
+                    if row["outcome"] in ("upload", "heartbeat") and row["frame_idx"] >= 0:
+                        rgb = src.read_rgb(row["frame_idx"])
+                        if rgb is not None:
+                            row["upload_file"] = uploads.write(row, rgb)
+            finally:
+                self.core.set_geometry(self.geometry)
         info = make_run_info(source=src, mode=params.mode, params=params, geometry=run.geometry,
                              reference=run.reference, boxes=run.boxes,
                              labels=self.labels_path, build_info=self.build_info, input_path=src.path)
         info["cancelled"] = result.cancelled
-        write_run(out, info, result.rows, fields,
-                  summarize(result.rows, params.mode, result.decode_failures, score,
+        if params.mode == "device":
+            self.core.set_geometry(run.geometry)
+            try:
+                info.update(upload_run_info(self.core, params, run.upload_area, run.sn))
+            finally:
+                self.core.set_geometry(self.geometry)
+        write_run(out, info, rows, fields,
+                  summarize(rows, params.mode, result.decode_failures, score,
                             cancelled=result.cancelled, skipped_no_footage=result.skipped_no_footage))
         return str(out)
