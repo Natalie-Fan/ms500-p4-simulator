@@ -13,7 +13,7 @@
   --teal-300:#4fc2ab; --teal-400:#1fb394; --teal-500:#00B498; --teal-700:#1e7b69; --teal-800:#1d5c51;
   --gray-0:#000000; --gray-950:#1a1a1a; --gray-900:#232323; --gray-850:#262626; --gray-750:#3a3a3a; --gray-700:#4a4a4a;
   --gray-50:#f5f6f6; --white:#ffffff;
-  --red-500:#e5534b; --amber-500:#f5a623; --amber-100:#fdf0d6;
+  --amber-500:#f5a623; --amber-100:#fdf0d6;
 
   --color-primary:#0b7a67; --color-primary-hover:#09695a;
   --color-brand:var(--teal-500);
@@ -40,6 +40,8 @@
   --shadow-card:0 1px 2px rgba(20,24,24,0.04);
   --duration-fast:120ms;
   --container-max:1200px;
+  /* 示意图颜色：与摄像头网页叠加层一致（www/js/index.js、flood_upload_roi.js），图框始终为深色，两种主题共用 */
+  --fig-curb:#ff3b30; --fig-lane:#3b82f6; --fig-crop:#ff9500;
   color-scheme: light;
 }
 @media (prefers-color-scheme: dark) {
@@ -245,20 +247,20 @@ td.num { font-variant-numeric: tabular-nums; white-space: nowrap; }
           <line x1="480" y1="0" x2="480" y2="1080"/><line x1="960" y1="0" x2="960" y2="1080"/><line x1="1440" y1="0" x2="1440" y2="1080"/>
           <line x1="0" y1="270" x2="1920" y2="270"/><line x1="0" y1="540" x2="1920" y2="540"/><line x1="0" y1="810" x2="1920" y2="810"/>
         </g>
-        <rect x="562" y="112" width="1356" height="356" fill="var(--amber-500)" fill-opacity="0.10" stroke="var(--amber-500)" stroke-width="5" stroke-dasharray="26 16"/>
-        <line x1="560" y1="230" x2="1920" y2="355" stroke="var(--red-500)" stroke-width="9"/>
-        <line x1="560" y1="378" x2="1920" y2="446" stroke="var(--teal-500)" stroke-width="9"/>
+        <rect x="562" y="112" width="1356" height="356" fill="var(--fig-crop)" fill-opacity="0.10" stroke="var(--fig-crop)" stroke-width="5" stroke-dasharray="26 16"/>
+        <line x1="560" y1="230" x2="1920" y2="355" stroke="var(--fig-curb)" stroke-width="9"/>
+        <line x1="560" y1="378" x2="1920" y2="446" stroke="var(--fig-lane)" stroke-width="9"/>
         <g font-family="ui-monospace, monospace" font-size="38" fill="#f2f2f2">
           <text x="60" y="1030">1920 × 1080</text>
-          <text x="590" y="96" fill="var(--amber-500)">crop 1360 × 360 · step 1</text>
-          <text x="600" y="215" fill="var(--red-500)">CURB 560,230 → 1920,355</text>
-          <text x="600" y="530" fill="var(--teal-500)">LANE 560,378 → 1920,446</text>
+          <text x="590" y="96" fill="var(--fig-crop)">crop 1360 × 360 · step 1</text>
+          <text x="600" y="215" fill="var(--fig-curb)">CURB 560,230 → 1920,355</text>
+          <text x="600" y="530" fill="var(--fig-lane)">LANE 560,378 → 1920,446</text>
         </g>
       </svg>
       <figcaption>
-        <span class="key"><i style="background:var(--red-500)"></i>CURB</span>
-        <span class="key"><i style="background:var(--teal-500)"></i>LANE</span>
-        <span class="key"><i style="background:var(--amber-500)"></i><span class="en">upload crop</span><span class="zh">上传裁剪区域</span></span>
+        <span class="key"><i style="background:var(--fig-curb)"></i>CURB</span>
+        <span class="key"><i style="background:var(--fig-lane)"></i>LANE</span>
+        <span class="key"><i style="background:var(--fig-crop)"></i><span class="en">upload crop</span><span class="zh">上传裁剪区域</span></span>
         <br><span class="en">The built-in default lines, drawn to scale, and the crop the camera derives from them.</span><span class="zh">固件内置的默认线（按比例绘制）以及摄像头由此推算出的裁剪区域。</span>
       </figcaption>
     </figure>
