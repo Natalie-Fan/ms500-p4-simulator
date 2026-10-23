@@ -182,6 +182,14 @@ validation live in `upload_area.py`.
 - The device-run dialog starts from it and converts with the dialog's period.
 - **Reset state** keeps the setting and clears the counter.
 
+### Serial number
+
+- **Serial number** text box in the device-state panel, next to the heartbeat field, default `SIM`,
+  same character rule as `--sn`. Used for upload names by device runs and Export run.
+
+Every new CLI option is therefore available in the GUI: `--heartbeat` (heartbeat field),
+`--upload-area` (Upload area menu), `--sn` (serial number field).
+
 ### Export
 
 **File ▸ Export run** uses the same `UploadWriter`, so names, sidecars and `upload_file` match the
@@ -209,5 +217,5 @@ CLI.
 | `tests/test_core.py` | `UploadRoi` fields, `crop` shape, name/description round-trip, ABI version 5 |
 | `tests/test_modes.py` | `heartbeat_readings` (0, 60 min @ 60 s = 60, 60 min @ 5 s = 720, 1 min @ 120 s = 1, out of range); synthetic device run writes `uploads/*.jpg` + `.json`, sets `upload_file`, image size equals the area in use; name collision suffix |
 | `tests/test_cli.py` | `--upload-area` both forms and bad input; `--heartbeat`; `--sn`; dense mode ignores them; `run.json` fields; `compare` of two runs of the same input passes |
-| `tests/test_gui_session.py` | area save/reload/delete; line move changes a line-derived area; heartbeat field reaches manual Sample and device runs; Export run matches the CLI |
+| `tests/test_gui_session.py` | area save/reload/delete; line move changes a line-derived area; heartbeat field reaches manual Sample and device runs; serial number field reaches upload names and rejects bad characters; Export run matches the CLI |
 | existing | golden C tests and the full pytest suite stay green |
