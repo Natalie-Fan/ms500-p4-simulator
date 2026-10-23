@@ -62,3 +62,32 @@ DENSE_FIELDS = [
     "frame_idx", "t_sec", "veto_usable", "veto_coverage", "veto_worst_class",
     "curb_correlation", "submerged", "severity", "shift_dx", "shift_dy", "gallery_slot",
 ]
+
+
+_UPLOAD_SOURCES = ("drawn", "lines", "full")
+
+
+@dataclass(frozen=True)
+class UploadRoi:
+    """The firmware's flood_upload_roi_t: the frame region uploaded, its step and where it came from."""
+    x: int
+    y: int
+    width: int
+    height: int
+    step: int
+    source: str          # "drawn" | "lines" | "full"
+    out_width: int
+    out_height: int
+
+    @classmethod
+    def from_array(cls, a) -> "UploadRoi":
+        return cls(int(a[0]), int(a[1]), int(a[2]), int(a[3]), int(a[4]), _UPLOAD_SOURCES[a[5]],
+                   int(a[6]), int(a[7]))
+
+    def to_array(self) -> list[int]:
+        return [self.x, self.y, self.width, self.height, self.step, _UPLOAD_SOURCES.index(self.source),
+                self.out_width, self.out_height]
+
+    def as_dict(self) -> dict:
+        return {"x": self.x, "y": self.y, "width": self.width, "height": self.height, "step": self.step,
+                "source": self.source, "out_width": self.out_width, "out_height": self.out_height}

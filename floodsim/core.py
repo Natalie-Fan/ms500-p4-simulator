@@ -2,9 +2,10 @@
 from __future__ import annotations
 
 import ctypes
+import datetime as dt
 import os
 import subprocess
-from ctypes import POINTER, byref, c_char_p, c_float, c_int32, c_uint8, c_uint32, c_void_p
+from ctypes import POINTER, byref, c_char_p, c_float, c_int32, c_int64, c_uint8, c_uint32, c_void_p
 from pathlib import Path
 from typing import Callable
 
@@ -12,7 +13,7 @@ import numpy as np
 
 from .errors import BuildError, FloodSimError
 from .geometry import Geometry
-from .results import Box, DeviceResult, ScoreResult
+from .results import Box, DeviceResult, ScoreResult, UploadRoi
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 NATIVE_DIR = REPO_ROOT / "native"
@@ -22,7 +23,7 @@ FLOOD_SUBDIR = "components/as_code/process_flood_detection"
 DLL_NAME = "flood_core.dll"
 EXE_NAME = "flood_sim.exe"
 STAMP_NAME = "floodsim.stamp"
-ABI_VERSION = 4
+ABI_VERSION = 5
 FRAME_W, FRAME_H = 1920, 1080
 MAX_BOXES = 32
 
@@ -44,6 +45,7 @@ def firmware_dir() -> Path:
 def source_files(fw: Path) -> list[Path]:
     flood = fw / FLOOD_SUBDIR
     files = [*flood.glob("*.c"), *flood.glob("*.h")]
+    files += [fw / "main" / "ai_process" / name for name in ("flood_upload_meta.c", "flood_upload_meta.h")]
     files += [p for p in NATIVE_DIR.rglob("*") if p.suffix in {".c", ".h", ".txt", ".cmake"}]
     return files
 
@@ -203,7 +205,7 @@ class Core:
             f.argtypes = list(argtypes)
 
         for name in ("sim_abi_version", "sim_sizeof_box", "sim_sizeof_score", "sim_sizeof_result",
-                     "sim_upload_downscale", "sim_heartbeat_every"):
+                     "sim_upload_max_pixels", "sim_upload_min_side", "sim_heartbeat_every"):
             fn(name, c_int32)
         for name in ("sim_submerged_below", "sim_veto_threshold", "sim_sample_period_s",
                      "sim_domain_x0", "sim_domain_x1"):
@@ -239,6 +241,15 @@ class Core:
         fn("sim_device_reset", None, c_void_p)
         fn("sim_device_forget_candidate", None, c_void_p)
         fn("sim_device_set_learning", None, c_void_p, c_int32)
+        _IP = POINTER(c_int32)
+        fn("sim_upload_roi", None, _IP, _IP)
+        fn("sim_upload_rect_valid", c_int32, _IP)
+        fn("sim_upload_crop", None, _U8P, _IP, _U8P)
+        fn("sim_upload_filename", c_int32, c_char_p, c_int32, c_char_p, c_int32,
+           c_int32, c_int32, c_int32, c_int32, c_int32, c_int32)
+        fn("sim_upload_description", c_int32, c_char_p, c_int32, c_int32, c_char_p, c_float, c_char_p,
+           c_int32, _IP, c_int64)
+        fn("sim_device_set_heartbeat", None, c_void_p, c_int32)
         fn("sim_device_sample", None, c_void_p, c_void_p, _PROVIDER_FN, c_void_p, POINTER(_SimResult))
 
     # names and constants
@@ -248,13 +259,55 @@ class Core:
     def submerged_below(self) -> float: return self._lib.sim_submerged_below()
     def veto_threshold(self) -> float: return self._lib.sim_veto_threshold()
     def sample_period_s(self) -> float: return self._lib.sim_sample_period_s()
-    def upload_downscale(self) -> int: return self._lib.sim_upload_downscale()
 
     def heartbeat_every(self) -> int: return self._lib.sim_heartbeat_every()
 
     def band_coverage(self, box: Box) -> float:
         b = _SimBox(box.x0, box.y0, box.x1, box.y1, box.confidence, box.cls)
         return self._lib.sim_band_coverage(byref(b))
+
+    # uploads (firmware flood_upload_roi.c / flood_upload_meta.c)
+    def upload_limits(self) -> tuple[int, int]:
+        return self._lib.sim_upload_min_side(), self._lib.sim_upload_max_pixels()
+
+    def upload_rect_valid(self, rect) -> bool:
+        return bool(self._lib.sim_upload_rect_valid((c_int32 * 4)(*[int(v) for v in rect])))
+
+    def upload_roi(self, drawn=None) -> UploadRoi:
+        out = (c_int32 * 8)()
+        arg = (c_int32 * 4)(*[int(v) for v in drawn]) if drawn is not None else None
+        self._lib.sim_upload_roi(arg, out)
+        return UploadRoi.from_array(list(out))
+
+    def crop(self, rgb: np.ndarray, roi: UploadRoi) -> np.ndarray:
+        # roi must come from upload_roi(): the C side trusts its bounds
+        if rgb.shape != (FRAME_H, FRAME_W, 3) or rgb.dtype != np.uint8:
+            raise FloodSimError(f"crop needs a {FRAME_W}x{FRAME_H} RGB uint8 frame, got {rgb.shape} {rgb.dtype}")
+        rgb = np.ascontiguousarray(rgb)
+        out = np.empty((roi.out_height, roi.out_width, 3), np.uint8)
+        self._lib.sim_upload_crop(_u8(rgb), (c_int32 * 8)(*roi.to_array()), _u8(out))
+        return out
+
+    def _text(self, call) -> str:
+        size = 512
+        while True:
+            buf = ctypes.create_string_buffer(size)
+            n = call(buf, size)
+            if n < size:
+                return buf.value.decode()
+            size = n + 1
+
+    def upload_filename(self, sn: str, heartbeat: bool, local: dt.datetime) -> str:
+        return self._text(lambda buf, size: self._lib.sim_upload_filename(
+            buf, size, sn.encode(), 1 if heartbeat else 0,
+            local.year, local.month, local.day, local.hour, local.minute, local.second))
+
+    def upload_description(self, *, heartbeat: bool, id: str, correlation: float, severity: str,
+                           slot: int, roi: UploadRoi, captured_at: int) -> str:
+        roi_arr = (c_int32 * 8)(*roi.to_array())
+        return self._text(lambda buf, size: self._lib.sim_upload_description(
+            buf, size, 1 if heartbeat else 0, id.encode(), float(correlation), severity.encode(),
+            int(slot), roi_arr, int(captured_at)))
 
     # geometry
     def default_geometry(self) -> list[float]:
@@ -436,6 +489,10 @@ class Device:
     def set_learning(self, on: bool) -> None:
         """flood_task.c pauses learning while the gallery is stale; off also drops a candidate."""
         self._core._lib.sim_device_set_learning(self._ptr, 1 if on else 0)
+
+    def set_heartbeat(self, readings: int) -> None:
+        """Heartbeat interval in readings (0 = off); kept across reset(), as the device keeps its setting."""
+        self._core._lib.sim_device_set_heartbeat(self._ptr, max(0, int(readings)))
 
     def sample(self, ref: Gallery | None, provider: Provider) -> DeviceResult:
         """One firmware sampling cycle; may admit an AUTO reference into `ref`."""

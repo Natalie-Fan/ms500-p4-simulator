@@ -1,3 +1,5 @@
+import datetime as dt
+import json
 import os
 import time
 from pathlib import Path
@@ -9,12 +11,12 @@ from floodsim import core as core_mod
 from floodsim.core import build_error_message, firmware_dir, needs_rebuild
 from floodsim.errors import FloodSimError
 from floodsim.geometry import Geometry
-from floodsim.results import Box
+from floodsim.results import Box, UploadRoi
 from tests.synth import CAR, dry_gray, dusk_gray, flooded_gray, night_gray
 
 
 def test_build_info_records_dll_and_firmware(build_info):
-    assert build_info["dll"]["abi"] == core_mod.ABI_VERSION == 4
+    assert build_info["dll"]["abi"] == core_mod.ABI_VERSION == 5
     assert build_info["dll"]["stale"] is False
     assert Path(build_info["firmware"]["dir"]).name == "NETWORK_P4_FLOOD_DETECTION"
     assert "commit" in build_info["firmware"] and "dirty" in build_info["firmware"]
@@ -264,3 +266,56 @@ def test_device_learning_switch(core):
     dev.set_learning(True)
     dev.sample(g, dusk)
     assert dev.sample(g, dusk).admitted
+
+
+def test_abi_is_5():
+    from floodsim.core import ABI_VERSION
+    assert ABI_VERSION == 5
+
+
+def test_upload_roi_from_default_lines(core):
+    roi = core.upload_roi()
+    assert roi == UploadRoi(560, 110, 1360, 360, 1, "lines", 1360, 360)
+    assert core.upload_limits() == (32, 518400)
+
+
+def test_upload_roi_drawn_and_invalid(core):
+    assert core.upload_roi((100, 100, 640, 480)).source == "drawn"
+    assert core.upload_rect_valid((100, 100, 640, 480))
+    assert not core.upload_rect_valid((1900, 0, 100, 100))
+    assert core.upload_roi((1900, 0, 100, 100)).source == "lines"
+
+
+def test_crop_matches_frame(core):
+    rgb = np.zeros((1080, 1920, 3), np.uint8)
+    rgb[16, 8] = (1, 2, 3)
+    out = core.crop(rgb, core.upload_roi((8, 16, 64, 64)))
+    assert out.shape == (64, 64, 3) and tuple(out[0, 0]) == (1, 2, 3)
+
+
+def test_crop_rejects_wrong_size(core):
+    with pytest.raises(FloodSimError, match="1920x1080"):
+        core.crop(np.zeros((720, 1280, 3), np.uint8), core.upload_roi())
+
+
+def test_upload_name_and_description(core):
+    local = dt.datetime(2026, 10, 22, 21, 46, 12)
+    assert core.upload_filename("SN1", True, local) == "SN1_flood_hb_20261022_214612.jpg"
+    desc = core.upload_description(heartbeat=False, id="00000A", correlation=0.312, severity="minor",
+                                   slot=0, roi=core.upload_roi(), captured_at=1792731693)
+    assert json.loads(desc) == {
+        "purpose": "flood_detection", "kind": "flood", "id": "00000A", "correlation": 0.312,
+        "severity": "minor", "slot": 0, "roi": {"x": 560, "y": 110, "width": 1360, "height": 360},
+        "step": 1, "roi_source": "lines", "source_frame": {"width": 1920, "height": 1080},
+        "captured_at": 1792731693}
+
+
+def test_device_heartbeat_setting(core):
+    ref = core.new_gallery()
+    ref.add_manual(dry_gray())
+    dev = core.new_device()
+    dev.set_heartbeat(1)
+    gray = dry_gray()
+    assert dev.sample(ref, lambda attempt: (gray, [], 0)).outcome == "heartbeat"
+    dev.set_heartbeat(0)
+    assert all(dev.sample(ref, lambda attempt: (gray, [], 0)).outcome == "clear" for _ in range(70))
