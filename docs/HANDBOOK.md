@@ -574,8 +574,9 @@ curve now scores every frame against what the device run learned.
 - **Device glue** (`flood_task.c`, `flood_frame_tap.c`, `flood_roi.h`,
   `flood_geometry_config.c`): these files depend on the RTOS and camera, so the simulator
   **copies** a few values from them instead of compiling them: the 60 s period, the grayscale
-  formula, the default lines, the geometry checks, the upload scale, and the per-sample gallery
-  bookkeeping order (skip when the gallery is empty; learn after each reading). All of them are listed,
+  formula, the default lines, the geometry checks, the heartbeat formula (`flood_task.c:342`), and the per-sample gallery
+  bookkeeping order (skip when the gallery is empty; learn after each reading). The upload crop and
+  names are not copied: they are compiled from `flood_upload_roi.c` and `flood_upload_meta.c`. All of them are listed,
   with their source file and line, in `native/device_constants.h`. If those firmware files change,
   compare that list by hand.
 
@@ -615,8 +616,10 @@ curve now scores every frame against what the device run learned.
   next frame. The simulator may therefore clear a passing vehicle more often than the camera does.
 - **First sample.** The simulator samples at t = 0, 60 s, 120 s…. The camera's first sample comes
   about 60 s after start.
-- **Uploaded images.** They are the same frames, scale and ID, but encoded by OpenCV rather than
-  the camera's JPEG hardware, so the files are not byte-identical.
+- **Uploaded images.** They are the camera's crop (the drawn area, or the one derived from the
+  lines), with no label. Names and descriptions come from the firmware's own code. Only the JPEG
+  differs: OpenCV quality 90 rather than the P4's hardware encoder, so the files are not
+  byte-identical.
 - **Floating point.** The PC and the camera's RISC-V processor may round some single-precision
   maths slightly differently. This only affects borderline veto cases; the correlation maths is
   unaffected.
