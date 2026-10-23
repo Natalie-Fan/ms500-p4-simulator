@@ -56,7 +56,7 @@ DEVICE_FIELDS = [
     "curb_correlation", "severity", "shift_dx", "shift_dy", "veto_usable",
     "veto_coverage", "veto_worst_class", "since_image",
     "gallery_slot", "gallery_source", "admitted", "notice", "gallery_count",
-    "candidate_pending",
+    "candidate_pending", "upload_file",
 ]
 DENSE_FIELDS = [
     "frame_idx", "t_sec", "veto_usable", "veto_coverage", "veto_worst_class",

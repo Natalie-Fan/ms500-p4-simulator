@@ -1,6 +1,7 @@
 """Device-faithful and dense runners over a frame source."""
 from __future__ import annotations
 
+import datetime as dt
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable
@@ -8,8 +9,9 @@ from typing import Callable
 import cv2
 import numpy as np
 
+from .clips import clip_start
+from .errors import FloodSimError
 from .results import DeviceResult, ScoreResult
-from .source import write_image
 
 Progress = Callable[[int, int], None]
 Cancel = Callable[[], bool]
@@ -21,6 +23,7 @@ class RunParams:
     period: float = 60.0
     retry_gap: float = 1.0
     every: int = 1
+    heartbeat_minutes: int = 60
 
 
 @dataclass
@@ -39,7 +42,7 @@ def device_row(sample: int, t: float, r: DeviceResult) -> dict:
             "veto_coverage": r.veto_coverage, "veto_worst_class": r.veto_worst_class,
             "since_image": r.since_image, "gallery_slot": r.gallery_slot,
             "gallery_source": r.gallery_source, "admitted": r.admitted, "notice": r.notice,
-            "gallery_count": r.gallery_count, "candidate_pending": r.candidate_pending}
+            "gallery_count": r.gallery_count, "candidate_pending": r.candidate_pending, "upload_file": ""}
 
 
 def dense_row(idx: int, t: float, s: ScoreResult) -> dict:
@@ -79,31 +82,77 @@ def sample_device_at(device, ref, feeder: FrameFeeder, t: float, retry_gap: floa
     return device.sample(ref, provider)
 
 
-class UploadWriter:
-    """What the camera would send: the frame decimated by FLOOD_ROI_DOWNSCALE with a
-    6-hex sequence label (flood_roi_composite + flood_report_upload, flood_task.c:248).
-    Encoded by OpenCV and labelled with an OpenCV font, so not byte-identical to the P4."""
+def heartbeat_readings(minutes: int, period_s: float) -> int:
+    """flood_task.c:342: minutes * 60000 / FLOOD_SAMPLE_PERIOD_MS, rounded down. 0 stays 0 (off);
+    any other value gives at least 1, so a period longer than the interval still sends heartbeats."""
+    if not 0 <= minutes <= 1440:
+        raise FloodSimError(f"heartbeat must be 0-1440 minutes, got {minutes}")
+    if minutes == 0:
+        return 0
+    return max(1, int(minutes * 60 // period_s))
 
-    def __init__(self, out_dir: Path, downscale: int):
+
+def make_clock(source, input_path) -> Callable[[float], dt.datetime]:
+    """Local wall time of a video offset: a record_YYYYMMDD_HHMMSS clip's start, else the input's
+    modified time (2000-01-01 when there is no file, e.g. in-memory test sources)."""
+    start = getattr(source, "start_clock", None) or clip_start(Path(input_path))
+    if start is None:
+        p = Path(input_path)
+        start = dt.datetime.fromtimestamp(p.stat().st_mtime) if p.exists() else dt.datetime(2000, 1, 1)
+    return lambda t: start + dt.timedelta(seconds=float(t))
+
+
+def upload_run_info(core, params: RunParams, drawn, sn: str) -> dict:
+    """run.json fields for the heartbeat and upload settings."""
+    return {"heartbeat": {"minutes": params.heartbeat_minutes,
+                          "readings": heartbeat_readings(params.heartbeat_minutes, params.period)},
+            "upload_area": dict(zip(("x", "y", "width", "height"), drawn)) if drawn else None,
+            "upload_area_used": core.upload_roi(drawn).as_dict(), "sn": sn}
+
+
+class UploadWriter:
+    """What the camera would send (flood_upload.c): the upload crop of the frame, named and described
+    by the firmware's flood_upload_meta.c. JPEG is OpenCV quality 90, so not byte-identical to the P4."""
+
+    def __init__(self, out_dir: Path, core, *, drawn=None, sn: str = "SIM",
+                 clock: Callable[[float], dt.datetime]):
         self.dir = Path(out_dir) / "uploads"
         self.dir.mkdir(parents=True, exist_ok=True)
-        self.downscale = downscale
+        self.core, self.drawn, self.sn, self.clock = core, drawn, sn, clock
         self._seq = 0
+        self._used: set[str] = set()
 
-    def write(self, sample: int, rgb: np.ndarray) -> Path:
-        label = f"{self._seq & 0xFFFFFF:06X}"
+    def _unique(self, name: str) -> str:
+        stem, n = name[:-4], 2
+        while name in self._used:
+            name = f"{stem}_{n}.jpg"
+            n += 1
+        self._used.add(name)
+        return name
+
+    def write(self, row: dict, rgb: np.ndarray) -> str:
+        heartbeat = row["outcome"] == "heartbeat"
+        roi = self.core.upload_roi(self.drawn)
+        crop = self.core.crop(rgb, roi)
+        upload_id = f"{self._seq & 0xFFFFFF:06X}"
         self._seq += 1
-        canvas = np.ascontiguousarray(rgb[::self.downscale, ::self.downscale, ::-1])
-        cv2.putText(canvas, label, (8, 28), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2, cv2.LINE_AA)
-        path = self.dir / f"{sample:05d}_{label}.jpg"
-        write_image(path, canvas)
-        return path
+        local = self.clock(row["t_sec"])
+        name = self._unique(self.core.upload_filename(self.sn, heartbeat, local))
+        desc = self.core.upload_description(
+            heartbeat=heartbeat, id=upload_id, correlation=row["curb_correlation"],
+            severity=row["severity"], slot=row["gallery_slot"], roi=roi,
+            captured_at=int(local.timestamp()))
+        cv2.imwrite(str(self.dir / name), np.ascontiguousarray(crop[:, :, ::-1]),
+                    [cv2.IMWRITE_JPEG_QUALITY, 90])
+        (self.dir / f"{name[:-4]}.json").write_text(desc + "\n", encoding="utf-8")
+        return name
 
 
 def run_device(core, source, boxes, ref, params: RunParams, *, uploads: UploadWriter | None = None,
                progress: Progress | None = None, cancel: Cancel | None = None) -> RunOutput:
     feeder = FrameFeeder(core, source, boxes)
     device = core.new_device()
+    device.set_heartbeat(heartbeat_readings(params.heartbeat_minutes, params.period))
     out = RunOutput()
     total = int((source.duration + 1e-9) // params.period) + 1
     has_footage = getattr(source, "has_footage", None)
@@ -118,11 +167,12 @@ def run_device(core, source, boxes, ref, params: RunParams, *, uploads: UploadWr
                 progress(k + 1, total)
             continue
         r = sample_device_at(device, ref, feeder, t, params.retry_gap)
-        out.rows.append(device_row(k, t, r))
+        row = device_row(k, t, r)
+        out.rows.append(row)
         if uploads and r.outcome in ("upload", "heartbeat") and r.frame_idx >= 0:
             rgb = source.read_rgb(r.frame_idx)
             if rgb is not None:
-                uploads.write(k, rgb)
+                row["upload_file"] = uploads.write(row, rgb)
         if progress:
             progress(k + 1, total)
     out.decode_failures = feeder.decode_failures

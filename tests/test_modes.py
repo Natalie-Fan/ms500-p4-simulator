@@ -1,7 +1,12 @@
+import datetime as dt
+import json
+from pathlib import Path
+
 import numpy as np
 import pytest
 
-from floodsim.modes import RunParams, UploadWriter, run_dense, run_device
+from floodsim.errors import FloodSimError
+from floodsim.modes import RunParams, UploadWriter, heartbeat_readings, make_clock, run_dense, run_device
 from floodsim.results import DENSE_FIELDS, DEVICE_FIELDS
 from floodsim.source import open_source, read_image_bgr
 from tests.synth import CAR, MemorySource, dry_gray, dusk_gray, flooded_gray, to_rgb, write_clip
@@ -37,19 +42,74 @@ def test_device_matches_golden_scenario(core, ref):
     assert list(out.rows[0]) == DEVICE_FIELDS
 
 
+CLOCK = lambda t: dt.datetime(2026, 10, 22, 12, 0, 0) + dt.timedelta(seconds=t)
+
+
 def test_device_writes_what_would_be_uploaded(core, ref, tmp_path):
-    uploads = UploadWriter(tmp_path, core.upload_downscale())
+    uploads = UploadWriter(tmp_path, core, sn="SN1", clock=CLOCK)
+    out = run_device(core, _golden_source(), StaticBoxes({}), ref, RunParams(), uploads=uploads)
+    files = sorted(f.name for f in (tmp_path / "uploads").iterdir())
+    assert files == ["SN1_flood_20261022_120100.jpg", "SN1_flood_20261022_120100.json"]
+    assert read_image_bgr(tmp_path / "uploads" / files[0]).shape == (360, 1360, 3)
+    desc = json.loads((tmp_path / "uploads" / files[1]).read_text())
+    assert desc["kind"] == "flood" and desc["id"] == "000000" and desc["roi_source"] == "lines"
+    assert [r["upload_file"] for r in out.rows] == ["", "SN1_flood_20261022_120100.jpg", ""]
+
+
+def test_device_upload_uses_drawn_area(core, ref, tmp_path):
+    uploads = UploadWriter(tmp_path, core, drawn=(0, 0, 640, 480), clock=CLOCK)
     run_device(core, _golden_source(), StaticBoxes({}), ref, RunParams(), uploads=uploads)
-    files = sorted((tmp_path / "uploads").iterdir())
-    assert [f.name for f in files] == ["00001_000000.jpg"]
-    assert read_image_bgr(files[0]).shape == (540, 960, 3)
+    jpg = next((tmp_path / "uploads").glob("*.jpg"))
+    assert jpg.name.startswith("SIM_flood_") and read_image_bgr(jpg).shape == (480, 640, 3)
 
 
-def test_device_heartbeat_on_60th_sample(core, ref):
+def test_upload_name_collision_gets_suffix(core, ref, tmp_path):
+    src = MemorySource([(0.0, FLOOD), (0.2, FLOOD), (0.4, FLOOD)])
+    uploads = UploadWriter(tmp_path, core, clock=CLOCK)
+    out = run_device(core, src, StaticBoxes({}), ref, RunParams(period=0.2), uploads=uploads)
+    assert [r["upload_file"] for r in out.rows] == [
+        "SIM_flood_20261022_120000.jpg", "SIM_flood_20261022_120000_2.jpg", "SIM_flood_20261022_120000_3.jpg"]
+
+
+def test_device_heartbeat_follows_minutes(core, ref):
     src = MemorySource([(t, DRY) for t in range(60)])
-    out = run_device(core, src, StaticBoxes({}), ref, RunParams(period=1.0))
+    out = run_device(core, src, StaticBoxes({}), ref, RunParams(period=1.0, heartbeat_minutes=1))
     assert len(out.rows) == 60
     assert out.rows[58]["outcome"] == "clear" and out.rows[59]["outcome"] == "heartbeat"
+
+
+def test_device_heartbeat_off(core, ref):
+    src = MemorySource([(t, DRY) for t in range(200)])
+    out = run_device(core, src, StaticBoxes({}), ref, RunParams(period=1.0, heartbeat_minutes=0))
+    assert "heartbeat" not in {r["outcome"] for r in out.rows}
+
+
+def test_default_heartbeat_is_hourly_in_video_time(core, ref):
+    src = MemorySource([(t, DRY) for t in range(120)])
+    out = run_device(core, src, StaticBoxes({}), ref, RunParams(period=1.0))
+    assert "heartbeat" not in {r["outcome"] for r in out.rows}     # 60 min @ 1 s = every 3600th
+
+
+@pytest.mark.parametrize("minutes,period,expected", [(0, 60, 0), (60, 60, 60), (60, 5, 720),
+                                                     (1, 120, 1), (1440, 60, 1440), (1, 61, 1)])
+def test_heartbeat_readings(minutes, period, expected):
+    assert heartbeat_readings(minutes, period) == expected
+
+
+@pytest.mark.parametrize("minutes", [-1, 1441])
+def test_heartbeat_readings_range(minutes):
+    with pytest.raises(FloodSimError):
+        heartbeat_readings(minutes, 60)
+
+
+def test_make_clock(tmp_path):
+    clip = tmp_path / "record_20261022_080000.avi"
+    clip.write_bytes(b"")
+    assert make_clock(MemorySource([]), clip)(90) == dt.datetime(2026, 10, 22, 8, 1, 30)
+    other = tmp_path / "x.avi"
+    other.write_bytes(b"")
+    start = dt.datetime.fromtimestamp(other.stat().st_mtime)
+    assert make_clock(MemorySource([]), other)(0) == start
 
 
 def test_device_without_reference_skips(core):
