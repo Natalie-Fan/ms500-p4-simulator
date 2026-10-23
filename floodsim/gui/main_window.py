@@ -17,6 +17,7 @@ from ..geometry import Geometry, load_geometry, save_geometry
 from ..modes import RunParams
 from ..source import VIDEO_EXTS
 from .frame_view import FrameView, OverlayToggles, Tool
+from .upload_area import rect_problem
 from .panels import SamplesTable, ToolsPanel, VerdictPanel
 from .timeline import TimelineWidget
 
@@ -453,6 +454,13 @@ class MainWindow(QMainWindow):
     # --------------------------------------------- upload area, heartbeat, sn
     def _on_upload_drawn(self, rect: QRectF) -> None:
         w, h = int(round(rect.width())), int(round(rect.height()))
+        if w < 4 or h < 4:
+            return   # 原因：几乎没有拖动，只是一次点击，静默忽略
+        problem = rect_problem(rect.x(), rect.y(), rect.width(), rect.height(),
+                               *(self._overlay or {}).get("upload_limits", (32, 518400)))
+        if problem:
+            self._show_error(problem)
+            return
         answer = QMessageBox.question(self, "Upload area", f"Save the upload area {w}×{h}?",
                                       QMessageBox.Save | QMessageBox.Cancel)
         if answer != QMessageBox.Save:

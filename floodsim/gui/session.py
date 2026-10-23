@@ -136,6 +136,7 @@ class Session:
     # --------------------------------------------------------------- input
     def open(self, path, *, fps=None, allow_stretch=False, no_detector=False) -> dict:
         src = open_source(Path(path), fps=fps, allow_stretch=allow_stretch)
+        area = load_upload_area(upload_area_path(src.path))   # 原因：先读区域文件，坏文件在改动任何状态之前就报错
         inner = None
         if not no_detector:
             try:
@@ -153,7 +154,7 @@ class Session:
                 if info["kind"] == "frame":
                     info.setdefault("input", str(self.source.path))
         self.source = src
-        self.upload_area = load_upload_area(upload_area_path(src.path))
+        self.upload_area = area
         self.boxes = LenientBoxes(inner)
         self.labels = None
         self.labels_path = None

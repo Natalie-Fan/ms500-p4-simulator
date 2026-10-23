@@ -53,6 +53,7 @@ def test_device_writes_what_would_be_uploaded(core, ref, tmp_path):
     assert read_image_bgr(tmp_path / "uploads" / files[0]).shape == (360, 1360, 3)
     desc = json.loads((tmp_path / "uploads" / files[1]).read_text())
     assert desc["kind"] == "flood" and desc["id"] == "000000" and desc["roi_source"] == "lines"
+    assert not (tmp_path / "uploads" / files[1]).read_bytes().endswith(b"\n")     # sidecar is the bare string
     assert [r["upload_file"] for r in out.rows] == ["", "SN1_flood_20261022_120100.jpg", ""]
 
 
@@ -100,7 +101,8 @@ def test_default_heartbeat_is_hourly_in_video_time(core, ref):
 
 
 @pytest.mark.parametrize("minutes,period,expected", [(0, 60, 0), (60, 60, 60), (60, 5, 720),
-                                                     (1, 120, 1), (1440, 60, 1440), (1, 61, 1)])
+                                                     (1, 120, 1), (1440, 60, 1440), (1, 61, 1),
+                                                     (60, 0.1, 36000)])
 def test_heartbeat_readings(minutes, period, expected):
     assert heartbeat_readings(minutes, period) == expected
 

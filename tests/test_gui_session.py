@@ -509,3 +509,12 @@ def test_export_uses_run_geometry(session, tmp_path):
         sidecar = json.loads(jpg.with_suffix(".json").read_text())
         roi_keys = ("x", "y", "width", "height")
         assert {k: sidecar["roi"][k] for k in roi_keys} == {k: used[k] for k in roi_keys}
+
+
+def test_open_with_malformed_upload_area_leaves_session_unchanged(session, tmp_path):
+    other = write_frame_folder(tmp_path / "other", [(0, dry_gray()), (1000, dry_gray())])
+    upload_area_path(other).write_text("{not json", encoding="utf-8")
+    before = session.source
+    with pytest.raises(FloodSimError, match="upload area"):
+        session.open(other, no_detector=True)
+    assert session.source is before and session.source.n_frames == 4

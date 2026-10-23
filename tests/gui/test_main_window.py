@@ -282,6 +282,22 @@ def test_upload_area_menu_heartbeat_and_sn(qtbot, tmp_path, window, monkeypatch)
     qtbot.waitUntil(lambda: window.session.sn == "CAM-9")
 
 
+def test_draw_upload_invalid_or_tiny_never_offers_save(qtbot, tmp_path, window, monkeypatch):
+    from PySide6.QtCore import QRectF
+    from PySide6.QtWidgets import QMessageBox
+    img = tmp_path / "dry.png"
+    write_image(img, to_rgb(dry_gray()))
+    _open(qtbot, window, img)
+    asked = []
+    monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: asked.append(1) or QMessageBox.Save)
+    window.frame_view.uploadAreaDrawn.emit(QRectF(0, 0, 2, 3))          # a click, not a drag
+    assert not asked and window.last_error is None
+    monkeypatch.setattr(window, "_show_error", lambda m: setattr(window, "last_error", m))
+    window.frame_view.uploadAreaDrawn.emit(QRectF(0, 0, 20, 20))        # sides under 32 px
+    assert not asked and "at least 32" in window.last_error
+    assert window.session.upload_area is None
+
+
 def test_run_dialog_heartbeat(qtbot):
     from floodsim.gui.main_window import RunDialog
     from floodsim.modes import RunParams

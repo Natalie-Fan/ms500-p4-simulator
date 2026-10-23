@@ -192,12 +192,13 @@ def test_cli_rejects_bad_upload_options(scenario, args):
     assert main(["run", str(folder), "--reference", str(ref), "--out", str(tmp / "o"), *args]) == 2
 
 
-def test_cli_dense_ignores_upload_options(scenario):
+def test_cli_dense_ignores_upload_options(scenario, caplog):
     folder, ref, tmp = scenario
     out = tmp / "dense"
     assert main(["run", str(folder), "--mode", "dense", "--reference", str(ref),
-                 "--heartbeat", "5", "--sn", "X", "--out", str(out)]) == 0
+                 "--heartbeat", "5", "--sn", "X", "--upload-area", "1900,0,100,100", "--out", str(out)]) == 0
     assert not (out / "uploads").exists()
+    assert "breaks the firmware rules" not in caplog.text
 
 
 def test_compare_ignores_upload_names(scenario):

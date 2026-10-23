@@ -89,7 +89,7 @@ def heartbeat_readings(minutes: int, period_s: float) -> int:
         raise FloodSimError(f"heartbeat must be 0-1440 minutes, got {minutes}")
     if minutes == 0:
         return 0
-    return max(1, int(minutes * 60 // period_s))
+    return max(1, (minutes * 60000) // round(period_s * 1000))   # 原因：和固件一样按整数毫秒算，避免浮点向下取整
 
 
 def make_clock(source, input_path) -> Callable[[float], dt.datetime]:
@@ -147,7 +147,7 @@ class UploadWriter:
         if not ok:
             raise FloodSimError(f"cannot encode upload image {name}")
         buf.tofile(str(self.dir / name))
-        (self.dir / f"{name[:-4]}.json").write_text(desc + "\n", encoding="utf-8")
+        (self.dir / f"{name[:-4]}.json").write_text(desc, encoding="utf-8")
         return name
 
 

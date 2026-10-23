@@ -139,7 +139,7 @@ def cmd_run(args) -> int:
     drawn = parse_upload_area(args.upload_area) if args.upload_area else None
     if args.mode == "dense" and (args.upload_area or args.sn != "SIM" or args.heartbeat != 60):
         log.info("dense mode never uploads: --heartbeat, --upload-area and --sn are ignored")
-    if drawn is not None and not core.upload_rect_valid(drawn):
+    if args.mode != "dense" and drawn is not None and not core.upload_rect_valid(drawn):
         log.warning("upload area %s breaks the firmware rules (sides >= 32, inside 1920x1080, "
                     "<= 518400 px); the camera would use the curb/lane lines, and so does this run", drawn)
     labels = Labels.load(args.labels) if args.labels else None
