@@ -1,0 +1,637 @@
+<!doctype html>
+<html lang="en" data-lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MS500-P4 flood detection guide</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Outfit:wght@600;700&display=swap">
+<style>
+/* AglaiaSense tokens, copied verbatim from design-system/tokens (colors, typography, spacing); only the ones this page uses */
+:root {
+  --teal-300:#4fc2ab; --teal-400:#1fb394; --teal-500:#00B498; --teal-700:#1e7b69; --teal-800:#1d5c51;
+  --gray-0:#000000; --gray-950:#1a1a1a; --gray-900:#232323; --gray-850:#262626; --gray-750:#3a3a3a; --gray-700:#4a4a4a;
+  --gray-50:#f5f6f6; --white:#ffffff;
+  --red-500:#e5534b; --amber-500:#f5a623; --amber-100:#fdf0d6;
+
+  --color-primary:#0b7a67; --color-primary-hover:#09695a;
+  --color-brand:var(--teal-500);
+  --color-fg:#1a1d1d; --color-fg-secondary:#4a5050; --color-fg-muted:#696e6e; --color-fg-on-primary:var(--white); --color-fg-primary:var(--color-primary);
+  --color-bg-canvas:var(--gray-50);
+  --color-surface:var(--white); --color-surface-sunken:var(--gray-50);
+  --color-button-bg:var(--white); --color-button-hover:#f5f6f6; --color-button-border:#e5e9e9;
+  --color-border:#e5e9e9; --color-focus-ring:#0b7a67;
+  --color-success:#187b4d;
+  --color-warning:#8a5a00; --color-warning-bg:var(--amber-100);
+  --color-danger:#ba3c35;
+  --color-link:var(--teal-700); --color-link-hover:var(--teal-800);
+
+  --font-display:'Outfit',system-ui,sans-serif;
+  --font-body:'Inter',system-ui,sans-serif;
+  --font-mono:ui-monospace,monospace;
+  --text-xs:0.75rem; --text-sm:0.875rem; --text-base:1rem; --text-md:1.125rem; --text-lg:1.25rem; --text-xl:1.5rem; --text-3xl:2.25rem;
+  --leading-tight:1.1; --leading-snug:1.25; --leading-normal:1.5; --leading-relaxed:1.65;
+  --weight-regular:400; --weight-medium:500; --weight-semibold:600; --weight-bold:700;
+
+  --space-1:4px; --space-2:8px; --space-3:12px; --space-4:16px; --space-5:20px; --space-6:24px; --space-8:32px; --space-10:40px; --space-12:48px;
+  --radius-md:4px; --radius-lg:8px; --radius-full:999px;
+  --radius-control:6px; --radius-card:10px;
+  --shadow-card:0 1px 2px rgba(20,24,24,0.04);
+  --duration-fast:120ms;
+  --container-max:1200px;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --color-primary:var(--teal-700); --color-primary-hover:#21836f;
+    --color-fg:#f2f2f2; --color-fg-secondary:#c4c4c4; --color-fg-muted:#a5a5a5; --color-fg-on-primary:var(--white); --color-fg-primary:var(--teal-300);
+    --color-bg-canvas:var(--gray-0);
+    --color-surface:var(--gray-900); --color-surface-sunken:var(--gray-950);
+    --color-button-bg:var(--gray-750); --color-button-hover:#444444; --color-button-border:#717171;
+    --color-border:var(--gray-700); --color-focus-ring:#4fc2ab;
+    --color-success:#25bc75;
+    --color-danger:#ed8a85; --color-warning:#f0b14a; --color-warning-bg:rgba(240,177,74,0.14);
+    --color-link:var(--teal-400); --color-link-hover:var(--teal-300);
+    --radius-control:4px; --radius-card:4px; --shadow-card:none;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --color-primary:var(--teal-700); --color-primary-hover:#21836f;
+  --color-fg:#f2f2f2; --color-fg-secondary:#c4c4c4; --color-fg-muted:#a5a5a5; --color-fg-on-primary:var(--white); --color-fg-primary:var(--teal-300);
+  --color-bg-canvas:var(--gray-0);
+  --color-surface:var(--gray-900); --color-surface-sunken:var(--gray-950);
+  --color-button-bg:var(--gray-750); --color-button-hover:#444444; --color-button-border:#717171;
+  --color-border:var(--gray-700); --color-focus-ring:#4fc2ab;
+  --color-success:#25bc75;
+  --color-danger:#ed8a85; --color-warning:#f0b14a; --color-warning-bg:rgba(240,177,74,0.14);
+  --color-link:var(--teal-400); --color-link-hover:var(--teal-300);
+  --radius-control:4px; --radius-card:4px; --shadow-card:none;
+  color-scheme: dark;
+}
+
+/* 语言切换：根元素 data-lang 为 en 或 zh */
+html[data-lang="en"] .zh, html[data-lang="zh"] .en { display: none !important; }
+
+/* 主题切换：浅色用深色 logo，深色用白色 logo */
+.logo-dark { display: none; }
+:root[data-theme="dark"] .logo-light { display: none; }
+:root[data-theme="dark"] .logo-dark { display: block; }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .logo-light { display: none; }
+  :root:not([data-theme="light"]) .logo-dark { display: block; }
+}
+
+* { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body {
+  margin: 0; background: var(--color-bg-canvas); color: var(--color-fg);
+  font-family: var(--font-body); font-size: var(--text-base); line-height: var(--leading-relaxed);
+}
+.wrap {
+  max-width: var(--container-max); margin: 0 auto;
+  padding-left: max(var(--space-4), env(safe-area-inset-left, 0px));
+  padding-right: max(var(--space-4), env(safe-area-inset-right, 0px));
+  padding-bottom: var(--space-12);
+}
+
+/* 顶栏：logo、语言与主题开关 */
+.topbar { position: sticky; top: 0; z-index: 5; background: var(--color-surface); border-bottom: 1px solid var(--color-border); }
+.topbar-inner {
+  max-width: var(--container-max); margin: 0 auto;
+  display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); flex-wrap: wrap;
+  padding: var(--space-2) max(var(--space-4), env(safe-area-inset-right, 0px)) var(--space-2) max(var(--space-4), env(safe-area-inset-left, 0px));
+}
+.brand { display: flex; align-items: center; gap: var(--space-3); min-width: 0; }
+.brand img { height: 28px; width: auto; }
+.brand-name { font-size: var(--text-sm); font-weight: var(--weight-semibold); color: var(--color-fg-secondary); white-space: nowrap; }
+.toggles { display: flex; gap: var(--space-2); flex-wrap: wrap; }
+.seg { display: inline-flex; border: 1px solid var(--color-button-border); border-radius: var(--radius-control); overflow: hidden; background: var(--color-button-bg); }
+.seg button {
+  font: var(--weight-regular) var(--text-sm)/1.2 var(--font-body); min-height: 32px; padding: var(--space-1) var(--space-3);
+  border: 0; cursor: pointer; background: transparent; color: var(--color-fg);
+  transition: background-color var(--duration-fast), color var(--duration-fast);
+}
+.seg button + button { border-left: 1px solid var(--color-button-border); }
+.seg button:hover { background: var(--color-button-hover); }
+.seg button[aria-pressed="true"] { background: var(--color-primary); color: var(--color-fg-on-primary); }
+:focus-visible { outline: 2px solid var(--color-focus-ring); outline-offset: 2px; }
+.seg button:focus-visible { outline-offset: -2px; }
+
+/* 页首 */
+header.hero { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr); gap: var(--space-8); align-items: center; padding-block: var(--space-10) var(--space-8); }
+.hero h1 {
+  font-family: var(--font-display); font-weight: var(--weight-bold);
+  font-size: clamp(1.875rem, 4.5vw, var(--text-3xl)); line-height: var(--leading-snug); margin: 0 0 var(--space-4);
+}
+.hero p { margin: 0 0 var(--space-3); color: var(--color-fg-secondary); max-width: 62ch; }
+.meta { font-family: var(--font-mono); font-size: var(--text-xs); color: var(--color-fg-muted); display: flex; gap: var(--space-1) var(--space-4); flex-wrap: wrap; margin-top: var(--space-4); }
+
+figure.frame { margin: 0; min-width: 0; }
+figure.frame svg { width: 100%; height: auto; display: block; border-radius: var(--radius-lg); }
+figure.frame figcaption { font-size: var(--text-sm); color: var(--color-fg-secondary); margin-top: var(--space-2); }
+.key { display: inline-flex; align-items: center; gap: 6px; margin-right: var(--space-4); white-space: nowrap; }
+.key i { display: inline-block; width: 18px; height: 3px; border-radius: 2px; }
+
+/* 正文：宽屏左侧目录 */
+.layout { display: grid; grid-template-columns: 210px minmax(0, 1fr); gap: var(--space-8); }
+nav.toc { position: sticky; top: 72px; align-self: start; font-size: var(--text-sm); }
+nav.toc ol { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
+nav.toc a { color: var(--color-fg-secondary); text-decoration: none; display: block; padding: 3px 0 3px var(--space-3); border-left: 2px solid var(--color-border); }
+nav.toc a:hover { color: var(--color-fg); border-left-color: var(--color-primary); }
+.label, nav.toc .group {
+  font-family: var(--font-mono); font-size: 11px; text-transform: uppercase; letter-spacing: 0.12em;
+  color: var(--color-fg-primary); font-weight: var(--weight-semibold);
+}
+nav.toc .group { margin: var(--space-4) 0 var(--space-1); }
+nav.toc .group:first-child { margin-top: 0; }
+
+main { min-width: 0; }
+.part { margin: var(--space-8) 0 var(--space-3); }
+.part:first-child { margin-top: 0; }
+section {
+  background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius-card);
+  box-shadow: var(--shadow-card); padding: var(--space-6); margin-bottom: var(--space-4); min-width: 0;
+}
+h2 { font-size: var(--text-xl); font-weight: var(--weight-semibold); line-height: var(--leading-snug); margin: 0 0 var(--space-3); }
+h3 { font-size: var(--text-base); font-weight: var(--weight-semibold); margin: var(--space-6) 0 var(--space-2); }
+p, li { max-width: 72ch; }
+p { margin: 0 0 var(--space-3); }
+ul, ol.steps { margin: 0 0 var(--space-3); padding-left: 1.3em; }
+li { margin-bottom: var(--space-1); }
+a { color: var(--color-link); }
+a:hover { color: var(--color-link-hover); }
+code { font-family: var(--font-mono); font-size: 0.875em; background: var(--color-surface-sunken); border: 1px solid var(--color-border); padding: 0 4px; border-radius: var(--radius-md); overflow-wrap: anywhere; }
+pre {
+  font-family: var(--font-mono); font-size: var(--text-sm); line-height: var(--leading-normal);
+  background: var(--color-surface-sunken); border: 1px solid var(--color-border);
+  padding: var(--space-3) var(--space-4); border-radius: var(--radius-control); overflow-x: auto; margin: 0 0 var(--space-4);
+}
+pre code { background: none; border: 0; padding: 0; overflow-wrap: normal; font-size: inherit; }
+.cmt { color: var(--color-fg-muted); }
+
+.table-wrap { overflow-x: auto; margin: 0 0 var(--space-4); }
+table { border-collapse: collapse; width: 100%; font-size: var(--text-sm); }
+th, td { text-align: left; padding: var(--space-2) var(--space-3); border-bottom: 1px solid var(--color-border); vertical-align: top; }
+th { font-weight: var(--weight-semibold); font-size: var(--text-xs); color: var(--color-fg-muted); white-space: nowrap; }
+td.num { font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+.pill { display: inline-block; font: var(--weight-semibold) var(--text-xs) var(--font-mono); padding: 1px 8px; border-radius: var(--radius-full); border: 1px solid currentColor; white-space: nowrap; }
+.pill.up { color: var(--color-danger); } .pill.hb { color: var(--color-fg-primary); } .pill.ok { color: var(--color-success); } .pill.bl { color: var(--color-fg-muted); }
+
+.warn {
+  border: 1px solid var(--amber-500); border-left-width: 4px; border-radius: var(--radius-control);
+  padding: var(--space-3) var(--space-4); margin: var(--space-1) 0 var(--space-4); background: var(--color-warning-bg);
+}
+.warn p:last-child { margin-bottom: 0; }
+.warn strong { color: var(--color-fg); }
+
+.pipe { display: flex; flex-wrap: wrap; gap: var(--space-2); align-items: center; margin: var(--space-1) 0 var(--space-4); font-size: var(--text-sm); }
+.pipe span { background: var(--color-surface-sunken); border: 1px solid var(--color-border); border-radius: var(--radius-control); padding: var(--space-1) var(--space-3); }
+.pipe b { color: var(--color-fg-muted); font-weight: var(--weight-regular); }
+
+@media (max-width: 899px) {
+  header.hero { grid-template-columns: minmax(0, 1fr); padding-block: var(--space-6) var(--space-5); }
+  .layout { grid-template-columns: minmax(0, 1fr); }
+  nav.toc { display: none; }
+}
+@media (max-width: 599px) {
+  section { padding: var(--space-4); }
+  .brand-name { display: none; }
+}
+@media (prefers-reduced-motion: no-preference) { html { scroll-behavior: smooth; } }
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+</head>
+<body>
+<div class="topbar">
+  <div class="topbar-inner">
+    <div class="brand">
+      <img class="logo-light" src="data:image/png;base64,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" alt="AglaiaSense" width="111" height="28">
+      <img class="logo-dark" src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAskAAAC0CAYAAABmFrHbAAAWfmNhQlgAABZ+anVtYgAAAB5qdW1kYzJwYQARABCAAACqADibcQNjMnBhAAAAFlhqdW1iAAAAR2p1bWRjMm1hABEAEIAAAKoAOJtxA3VybjpjMnBhOjkzZTdmM2E4LTcxYjMtNDEyYy1hZmUwLTIzODEwMjM0NDhjOAAAAAOTanVtYgAAAClqdW1kYzJhcwARABCAAACqADibcQNjMnBhLmFzc2VydGlvbnMAAAAAuGp1bWIAAABEanVtZGNib3IAEQAQgAAAqgA4m3ETYzJwYS5pbmdyZWRpZW50LnYzAAAAABhjMnNoEd6JUWXGMP68gMeDPuGQCQAAAGxjYm9yo2lkYzpmb3JtYXRpaW1hZ2UvcG5namluc3RhbmNlSUR4LHhtcDppaWQ6MGUyMWQ5ZjAtMDMwYS00MTQyLWIzMTktZWI5NmEzMjU1YmVkbHJlbGF0aW9uc2hpcGhwYXJlbnRPZgAAAeJqdW1iAAAAQWp1bWRjYm9yABEAEIAAAKoAOJtxE2MycGEuYWN0aW9ucy52MgAAAAAYYzJzaFyEUGsIqc6fiRVpNLil2M0AAAGZY2JvcqJnYWN0aW9uc4KiZmFjdGlvbmtjMnBhLm9wZW5lZGpwYXJhbWV0ZXJzoWtpbmdyZWRpZW50c4GiY3VybHgtc2VsZiNqdW1iZj1jMnBhLmFzc2VydGlvbnMvYzJwYS5pbmdyZWRpZW50LnYzZGhhc2hYIGsRWHPkm2gycLEUsdpYLBcZ6CrPQTCzwJhzwQ5viNV0pGZhY3Rpb254HWNvbS5hbnRocm9waWMuY2xhdWRlLnByb3ZpZGVkanBhcmFtZXRlcnOheB9jb20uYW50aHJvcGljLm9yaWdpbi1jb25maWRlbmNlZ3Vua25vd25rZGVzY3JpcHRpb254ZkNsYXVkZSBwcm92aWRlZCB0aGlzIGZpbGUgYXQgdGhlIHJlcXVlc3Qgb2YgYSB1c2VyIGFuZCBtYXkgaGF2ZSBjcmVhdGVkIG9yIG1vZGlmaWVkIHRoZSBmaWxlIGNvbnRlbnRzLm1zb2Z0d2FyZUFnZW50oWRuYW1lZkNsYXVkZXJhbGxBY3Rpb25zSW5jbHVkZWT1AAAAyGp1bWIAAABAanVtZGNib3IAEQAQgAAAqgA4m3ETYzJwYS5oYXNoLmRhdGEAAAAAGGMyc2i+0DgSbVs3zah4jEaM7sLPAAAAgGNib3KlY2FsZ2ZzaGEyNTZjcGFkTQAAAAAAAAAAAAAAAABkaGFzaFggmZ4ni4z5MOXx5B1aJWtVQPQ7uk6tHKjMCPZYq5YdISRkbmFtZW5qdW1iZiBtYW5pZmVzdGpleGNsdXNpb25zgaJlc3RhcnQYIWZsZW5ndGgZFooAAAI+anVtYgAAACdqdW1kYzJjbAARABCAAACqADibcQNjMnBhLmNsYWltLnYyAAAAAg9jYm9ypWNhbGdmc2hhMjU2aXNpZ25hdHVyZXhNc2VsZiNqdW1iZj0vYzJwYS91cm46YzJwYTo5M2U3ZjNhOC03MWIzLTQxMmMtYWZlMC0yMzgxMDIzNDQ4YzgvYzJwYS5zaWduYXR1cmVqaW5zdGFuY2VJRHgseG1wOmlpZDoxZjcxMDNlZC1mNTdkLTQzNTAtYjZhYi1hZWZhYWUyYzBiM2VyY3JlYXRlZF9hc3NlcnRpb25zg6JjdXJseC1zZWxmI2p1bWJmPWMycGEuYXNzZXJ0aW9ucy9jMnBhLmluZ3JlZGllbnQudjNkaGFzaFggaxFYc+SbaDJwsRSx2lgsFxnoKs9BMLPAmHPBDm+I1XSiY3VybHgqc2VsZiNqdW1iZj1jMnBhLmFzc2VydGlvbnMvYzJwYS5hY3Rpb25zLnYyZGhhc2hYIHCUC4L+EKzFaI6JRXFMFUvYKxPo7vGDlhqMfFmGjT9iomN1cmx4KXNlbGYjanVtYmY9YzJwYS5hc3NlcnRpb25zL2MycGEuaGFzaC5kYXRhZGhhc2hYIPwBxtogWc+JFIEJHt0J/kqtjKlHpmKeC3cRcRKONVfldGNsYWltX2dlbmVyYXRvcl9pbmZvo2RuYW1lb0FudGhyb3BpYyBGaWxlc2d2ZXJzaW9uZTEuMC4wa3NwZWNWZXJzaW9uZTIuNC4wAAAQOGp1bWIAAAAoanVtZGMyY3MAEQAQgAAAqgA4m3EDYzJwYS5zaWduYXR1cmUAAAAQCGNib3LShFkCEqIBJhghWQIKMIICBjCCAY2gAwIBAgIUQOWgCu7COdC+uIP6BkIFPWdVEwAwCgYIKoZIzj0EAwMwSTEXMBUGA1UEChMOQW50aHJvcGljLCBQQkMxLjAsBgNVBAMTJUFudGhyb3BpYyBDb250ZW50IENyZWRlbnRpYWxzIFJvb3QgQ0EwHhcNMjYwODA3MTg0MzU2WhcNMjgwODA2MTk0MzU2WjBEMRcwFQYDVQQKEw5BbnRocm9waWMsIFBCQzEpMCcGA1UEAxMgQW50aHJvcGljIENsYXVkZSBDb250ZW50IFNpZ25pbmcwWTATBgcqhkjOPQIBBggqhkjOPQMBBwNCAASYegpry1AYBRTVNL1CpTlbROnY3dey+UrsF9C3phYrATN3ZHf93Mo8RQN0KOUuOn19P4oWNFWe5n2/She9N7eTo1gwVjAOBgNVHQ8BAf8EBAMCB4AwFQYDVR0lBA4wDAYKKwYBBAGD6F4CATAMBgNVHRMBAf8EAjAAMB8GA1UdIwQYMBaAFM5R4gSBTmRbI/jjxM+aPpzB11zCMAoGCCqGSM49BAMDA2cAMGQCMDFzHRSeAXrSy1WOzkbhPZ6Km2wGTmZ/2gK18k8BQGXyqz88Rdrz6CTX9flAnYNVxgIwcF9c3fVhqmJKpi+UhasNUMko69cyX6STPfta3Q8EjyzDjzoyrol46FP6VFHhvUcJoWNwYWRZDZ4AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA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" alt="AglaiaSense" width="111" height="28">
+      <span class="brand-name">MS500-P4 · <span class="en">Flood detection</span><span class="zh">积水检测</span></span>
+    </div>
+    <div class="toggles">
+      <div class="seg" role="group" aria-label="Language / 语言">
+        <button id="btn-en" type="button" aria-pressed="false" data-lang-set="en">English</button>
+        <button id="btn-zh" type="button" aria-pressed="false" data-lang-set="zh">中文</button>
+      </div>
+      <div class="seg" role="group" aria-label="Theme / 主题">
+        <button id="btn-light" type="button" aria-pressed="false" data-theme-set="light"><span class="en">Light</span><span class="zh">浅色</span></button>
+        <button id="btn-dark" type="button" aria-pressed="false" data-theme-set="dark"><span class="en">Dark</span><span class="zh">深色</span></button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="wrap">
+  <header class="hero">
+    <div>
+      <h1><span class="en">Is the curb still there?</span><span class="zh">路缘还在吗？</span></h1>
+      <p class="en">The MS500-P4 camera watches one stretch of curb. Once a minute it compares a thin strip along the curb with dry reference images. Rain leaves the curb edge visible; standing water hides it. When the strip stops matching, the camera uploads a cropped image to Device Manager.</p>
+      <p class="zh">MS500-P4 摄像头盯着一段路缘。每分钟一次，它把路缘边上的一条窄带与晴天参考图比较。下雨时路缘边缘仍然可见，积水会把它盖住。窄带不再匹配时，摄像头把裁剪后的图片上传到 Device Manager。</p>
+      <p class="en">This page covers the two repositories: the <strong>firmware</strong> that runs on the camera, and the <strong>simulator</strong> that runs the same C code on recorded video.</p>
+      <p class="zh">本页介绍两个仓库：在摄像头上运行的<strong>固件</strong>，以及在录像上运行同一套 C 代码的<strong>模拟器</strong>。</p>
+      <div class="meta">
+        <span>NETWORK_P4_FLOOD_DETECTION</span><span>ms500-p4-simulator</span><span>ESP-IDF v5.4.3 · ESP32-P4</span><span class="en">Updated 2026-10-23</span><span class="zh">更新于 2026-10-23</span>
+      </div>
+    </div>
+    <figure class="frame">
+      <!-- 默认几何（flood_geometry_config.c）与由线推算的上传区域，按 1920x1080 比例绘制；画面底色在两种主题下都为深色 -->
+      <svg viewBox="0 0 1920 1080" lang="en" role="img" aria-label="Default curb and lane lines and the upload crop on a 1920 by 1080 frame">
+        <rect x="0" y="0" width="1920" height="1080" fill="var(--gray-900)"/>
+        <g stroke="var(--white)" stroke-opacity="0.12" stroke-width="2">
+          <line x1="480" y1="0" x2="480" y2="1080"/><line x1="960" y1="0" x2="960" y2="1080"/><line x1="1440" y1="0" x2="1440" y2="1080"/>
+          <line x1="0" y1="270" x2="1920" y2="270"/><line x1="0" y1="540" x2="1920" y2="540"/><line x1="0" y1="810" x2="1920" y2="810"/>
+        </g>
+        <rect x="562" y="112" width="1356" height="356" fill="var(--amber-500)" fill-opacity="0.10" stroke="var(--amber-500)" stroke-width="5" stroke-dasharray="26 16"/>
+        <line x1="560" y1="230" x2="1920" y2="355" stroke="var(--red-500)" stroke-width="9"/>
+        <line x1="560" y1="378" x2="1920" y2="446" stroke="var(--teal-500)" stroke-width="9"/>
+        <g font-family="ui-monospace, monospace" font-size="38" fill="#f2f2f2">
+          <text x="60" y="1030">1920 × 1080</text>
+          <text x="590" y="96" fill="var(--amber-500)">crop 1360 × 360 · step 1</text>
+          <text x="600" y="215" fill="var(--red-500)">CURB 560,230 → 1920,355</text>
+          <text x="600" y="530" fill="var(--teal-500)">LANE 560,378 → 1920,446</text>
+        </g>
+      </svg>
+      <figcaption>
+        <span class="key"><i style="background:var(--red-500)"></i>CURB</span>
+        <span class="key"><i style="background:var(--teal-500)"></i>LANE</span>
+        <span class="key"><i style="background:var(--amber-500)"></i><span class="en">upload crop</span><span class="zh">上传裁剪区域</span></span>
+        <br><span class="en">The built-in default lines, drawn to scale, and the crop the camera derives from them.</span><span class="zh">固件内置的默认线（按比例绘制）以及摄像头由此推算出的裁剪区域。</span>
+      </figcaption>
+    </figure>
+  </header>
+
+  <div class="layout">
+    <nav class="toc" aria-label="Contents">
+      <ol>
+        <li class="group"><span class="en">Concepts</span><span class="zh">概念</span></li>
+        <li><a href="#how"><span class="en">How detection works</span><span class="zh">检测原理</span></a></li>
+        <li><a href="#outcomes"><span class="en">What a reading reports</span><span class="zh">每次读数的结果</span></a></li>
+        <li class="group"><span class="en">Firmware</span><span class="zh">固件</span></li>
+        <li><a href="#fw-setup"><span class="en">Set up a camera</span><span class="zh">设置摄像头</span></a></li>
+        <li><a href="#fw-dm"><span class="en">Device Manager settings</span><span class="zh">Device Manager 设置</span></a></li>
+        <li><a href="#fw-uploads"><span class="en">Uploaded images</span><span class="zh">上传的图片</span></a></li>
+        <li><a href="#fw-web"><span class="en">Web page and API</span><span class="zh">网页与 API</span></a></li>
+        <li><a href="#fw-storage"><span class="en">Where data is kept</span><span class="zh">数据存放位置</span></a></li>
+        <li><a href="#fw-build"><span class="en">Build and flash</span><span class="zh">编译与烧录</span></a></li>
+        <li><a href="#fw-code"><span class="en">Code map</span><span class="zh">代码结构</span></a></li>
+        <li><a href="#fw-trouble"><span class="en">Troubleshooting</span><span class="zh">故障排查</span></a></li>
+        <li class="group"><span class="en">Simulator</span><span class="zh">模拟器</span></li>
+        <li><a href="#sim-setup"><span class="en">Install</span><span class="zh">安装</span></a></li>
+        <li><a href="#sim-cli"><span class="en">Command line</span><span class="zh">命令行</span></a></li>
+        <li><a href="#sim-out"><span class="en">Run folder and uploads</span><span class="zh">运行目录与上传图片</span></a></li>
+        <li><a href="#sim-gui"><span class="en">GUI</span><span class="zh">图形界面</span></a></li>
+        <li><a href="#sim-gaps"><span class="en">Differences from the camera</span><span class="zh">与摄像头的差异</span></a></li>
+        <li><a href="#docs"><span class="en">Further reading</span><span class="zh">延伸阅读</span></a></li>
+      </ol>
+    </nav>
+
+    <main>
+      <p class="part label"><span class="en">Concepts</span><span class="zh">概念</span></p>
+
+      <section id="how">
+        <h2><span class="en">How detection works</span><span class="zh">检测原理</span></h2>
+        <div class="pipe">
+          <span class="en">Frame 1920×1080</span><span class="zh">画面 1920×1080</span><b>→</b>
+          <span class="en">Obstruction check</span><span class="zh">遮挡检查</span><b>→</b>
+          <span class="en">Curb strip vs. gallery</span><span class="zh">路缘窄带对比图库</span><b>→</b>
+          <span class="en">Correlation</span><span class="zh">相关系数</span><b>→</b>
+          <span class="en">Outcome</span><span class="zh">结果</span>
+        </div>
+        <div class="table-wrap"><table>
+          <thead><tr><th><span class="en">Term</span><span class="zh">术语</span></th><th><span class="en">Meaning</span><span class="zh">含义</span></th></tr></thead>
+          <tbody>
+            <tr><td><span class="en">Curb and lane lines</span><span class="zh">路缘线与车道线</span></td><td><span class="en">Two lines drawn on the web page in 1920×1080 frame coordinates: the curb line at the foot of the curb and the lane line on the road below it. The sampled curb strip is derived from them.</span><span class="zh">在网页上用 1920×1080 画面坐标绘制的两条线：路缘线画在路缘根部，车道线画在其下方的路面上。取样的路缘窄带由这两条线推算。</span></td></tr>
+            <tr><td><span class="en">Dry reference gallery</span><span class="zh">晴天参考图库</span></td><td><span class="en">Up to 8 dry references, so each reading is compared with whichever matches the current lighting. <strong>Manual</strong> references come from Capture Baseline; the camera adds <strong>learned</strong> ones itself when a reading is confidently dry (0.65 ≤ correlation &lt; 0.95) and a manual reference still scores at least 0.55.</span><span class="zh">最多 8 张晴天参考图，每次读数与最符合当前光照的一张比较。<strong>手动</strong>参考来自“拍摄基线”；当读数明确为晴天（0.65 ≤ 相关系数 &lt; 0.95）且至少一张手动参考仍得分 ≥ 0.55 时，摄像头会自动<strong>学习</strong>新参考。</span></td></tr>
+            <tr><td><span class="en">Correlation</span><span class="zh">相关系数</span></td><td><span class="en">−1 to 1: how much the curb strip still looks like the best reference. Normalized, so brightness and contrast changes don't count. <strong>Below 0.45 means submerged.</strong></span><span class="zh">−1 到 1：路缘窄带与最佳参考的相似程度。经过归一化，亮度和对比度变化不影响结果。<strong>低于 0.45 即判定为被淹没。</strong></span></td></tr>
+            <tr><td><span class="en">Severity</span><span class="zh">严重程度</span></td><td><code>none</code> ≥ 0.45 &gt; <code>minor</code> ≥ 0.05 &gt; <code>moderate</code> ≥ −0.10 &gt; <code>severe</code></td></tr>
+            <tr><td><span class="en">Obstruction veto</span><span class="zh">遮挡否决</span></td><td><span class="en">People and vehicles found by the traffic model. If they hide 15% or more of the curb, the frame isn't used, and the camera tries a second frame. Something in the way is not evidence of a flood.</span><span class="zh">交通模型检测到的人和车辆。若遮住路缘的 15% 或以上，该帧不使用，摄像头会再取一帧。被挡住不能算作积水的证据。</span></td></tr>
+            <tr><td><span class="en">Shift</span><span class="zh">位移校正</span></td><td><span class="en">Aligns against a patch of pavement above the curb, so a sagging camera mount doesn't look like a flood.</span><span class="zh">以路缘上方的一块路面为参照对齐，避免支架下垂被误判为积水。</span></td></tr>
+          </tbody>
+        </table></div>
+      </section>
+
+      <section id="outcomes">
+        <h2><span class="en">What a reading reports</span><span class="zh">每次读数的结果</span></h2>
+        <p class="en">The camera takes one reading every 60 seconds, with up to 2 frames per reading.</p>
+        <p class="zh">摄像头每 60 秒读数一次，每次最多取 2 帧。</p>
+        <div class="table-wrap"><table>
+          <thead><tr><th><span class="en">Outcome</span><span class="zh">结果</span></th><th><span class="en">Meaning</span><span class="zh">含义</span></th><th><span class="en">Image uploaded?</span><span class="zh">是否上传图片</span></th></tr></thead>
+          <tbody>
+            <tr><td><span class="pill up">upload</span></td><td><span class="en">Curb submerged: possible flood.</span><span class="zh">路缘被淹没：可能积水。</span></td><td><span class="en">Yes</span><span class="zh">是</span></td></tr>
+            <tr><td><span class="pill hb">heartbeat</span></td><td><span class="en">Dry, but the heartbeat interval has passed since the last image. Proves the camera is alive.</span><span class="zh">晴天，但距上一张图片已到心跳间隔，用于证明摄像头在线。</span></td><td><span class="en">Yes</span><span class="zh">是</span></td></tr>
+            <tr><td><span class="pill ok">clear</span></td><td><span class="en">Curb visible: no flood.</span><span class="zh">路缘可见：无积水。</span></td><td><span class="en">No</span><span class="zh">否</span></td></tr>
+            <tr><td><span class="pill bl">blocked</span></td><td><span class="en">Obstructed on both frames. An abstention, never "no flood".</span><span class="zh">两帧都被遮挡。属于弃权，不代表“无积水”。</span></td><td><span class="en">No</span><span class="zh">否</span></td></tr>
+          </tbody>
+        </table></div>
+        <p class="en">With an empty gallery the camera logs <code>Dry reference gallery empty, skipping sample</code> and reports nothing, heartbeats included. Capture a baseline first.</p>
+        <p class="zh">图库为空时，摄像头记录 <code>Dry reference gallery empty, skipping sample</code>，不报告任何结果，也不发送心跳。请先拍摄基线。</p>
+      </section>
+
+      <p class="part label"><span class="en">Firmware · NETWORK_P4_FLOOD_DETECTION</span><span class="zh">固件 · NETWORK_P4_FLOOD_DETECTION</span></p>
+
+      <section id="fw-setup">
+        <h2><span class="en">Set up a camera</span><span class="zh">设置摄像头</span></h2>
+        <ol class="steps">
+          <li><span class="en">Open the camera's web page and choose <strong>Edit Geometry</strong>. Click the curb line's two points, then the lane line's two points, and save.</span><span class="zh">打开摄像头网页，选择 <strong>Edit Geometry</strong>。依次点击路缘线的两个点、车道线的两个点，然后保存。</span></li>
+          <li><span class="en">On a dry day, press <strong>Capture Baseline</strong> on the web page, or turn on <strong>Capture Flood Baseline</strong> in Device Manager. Add more baselines later for night or other lighting.</span><span class="zh">晴天时在网页上按 <strong>Capture Baseline</strong>，或在 Device Manager 中打开 <strong>Capture Flood Baseline</strong>。之后可为夜间等其他光照再添加基线。</span></li>
+          <li><span class="en">Optional: draw an <strong>upload area</strong> if the crop worked out from the lines doesn't show what you need.</span><span class="zh">可选：如果由线推算的裁剪区域不合适，可以绘制<strong>上传区域</strong>。</span></li>
+          <li><span class="en">Set <strong>Flood Heartbeat Interval</strong> in Device Manager. No reboot is needed.</span><span class="zh">在 Device Manager 中设置 <strong>Flood Heartbeat Interval</strong>，无需重启。</span></li>
+        </ol>
+        <p class="en">Moving the lines marks the gallery as stale. Manual references are rebuilt automatically from the baseline frames kept on the SD card.</p>
+        <p class="zh">移动线条后图库会被标记为过期，手动参考会根据 SD 卡上保存的基线帧自动重建。</p>
+      </section>
+
+      <section id="fw-dm">
+        <h2><span class="en">Device Manager settings</span><span class="zh">Device Manager 设置</span></h2>
+        <p class="en">Both appear in the camera's unit settings. The camera publishes the list itself, so they only show up on flood firmware.</p>
+        <p class="zh">两项都在摄像头的单元设置（unit settings）中。设置列表由摄像头自己上报，因此只有洪水检测固件才会显示。</p>
+        <div class="table-wrap"><table>
+          <thead><tr><th><span class="en">Setting</span><span class="zh">设置</span></th><th><span class="en">Key</span><span class="zh">键名</span></th><th><span class="en">Values</span><span class="zh">取值</span></th><th><span class="en">Behaviour</span><span class="zh">行为</span></th></tr></thead>
+          <tbody>
+            <tr><td>Flood Heartbeat Interval</td><td><code>flood_heartbeat</code></td><td class="num"><span class="en">0–1440 min, default 60</span><span class="zh">0–1440 分钟，默认 60</span></td><td><span class="en">Minutes between dry-weather images; 0 turns heartbeats off. Applies on the next reading and is saved to NVS. The timer runs from the last image sent, so lowering it can send one straight away.</span><span class="zh">晴天图片的间隔（分钟），0 表示关闭心跳。下一次读数即生效并保存到 NVS。计时从上一张图片开始，因此调小后可能立即发送一张。</span></td></tr>
+            <tr><td>Capture Flood Baseline</td><td><code>capture_flood_baseline</code></td><td><span class="en">switch (always reads off)</span><span class="zh">开关（读取时总为关）</span></td><td><span class="en">Turning it on takes a snapshot, saves it as the baseline and waits up to 50 s for the flood task to add it. The result is reported as <code>FBL</code> and the snapshot is uploaded like an IMG image.</span><span class="zh">打开后拍摄一张快照保存为基线，最多等待 50 秒让洪水任务加入图库。结果以 <code>FBL</code> 上报，快照像 IMG 一样上传。</span></td></tr>
+          </tbody>
+        </table></div>
+      </section>
+
+      <section id="fw-uploads">
+        <h2><span class="en">Uploaded images</span><span class="zh">上传的图片</span></h2>
+        <p class="en">Flood and heartbeat images are a crop of the raw frame, taken before any overlay is drawn and from the same frame the verdict came from. They are JPEG, quality 90.</p>
+        <p class="zh">洪水图片和心跳图片是原始画面的裁剪，在绘制任何叠加图形之前截取，并且与得出判定的是同一帧。格式为 JPEG，质量 90。</p>
+        <h3><span class="en">Which area is cropped</span><span class="zh">裁剪哪个区域</span></h3>
+        <ol class="steps">
+          <li><span class="en"><strong>Drawn:</strong> the upload area drawn on the web page, at full resolution. Sides at least 32 px, at most 518,400 px in total (for example 960×540).</span><span class="zh"><strong>手动绘制：</strong>网页上绘制的上传区域，原始分辨率。边长不小于 32 像素，总面积不超过 518,400 像素（例如 960×540）。</span></li>
+          <li><span class="en"><strong>From the lines:</strong> across the lines' width, from one curb-to-lane distance above the curb to a quarter of that distance below the lane. If it's larger than 518,400 px, every 2nd (or 3rd…) pixel is kept.</span><span class="zh"><strong>由线推算：</strong>横向覆盖线条宽度，纵向从路缘线上方一个“路缘到车道”距离，到车道线下方四分之一个该距离。若面积超过 518,400 像素，则隔 2（或 3…）个像素取一个。</span></li>
+          <li><span class="en"><strong>Whole frame:</strong> at half size, only if the lines can't be used.</span><span class="zh"><strong>整幅画面：</strong>缩小一半，仅在线条无法使用时。</span></li>
+        </ol>
+        <p class="en">Output sides are trimmed to whole 8-pixel blocks. With the default lines the crop is 1360×360 at full resolution, as in the picture at the top.</p>
+        <p class="zh">输出边长裁到 8 像素的整数倍。使用默认线时，裁剪结果为 1360×360、原始分辨率，见页首图示。</p>
+        <h3><span class="en">File name and description</span><span class="zh">文件名与描述</span></h3>
+        <pre><code>MS500-H120-EP-2614-1001_flood_20261022_220133.jpg      <span class="cmt"># flood</span>
+MS500-H120-EP-2614-1001_flood_hb_20261022_214612.jpg   <span class="cmt"># heartbeat</span></code></pre>
+        <p class="en">The time is the capture time. The <code>i_description</code> field is JSON:</p>
+        <p class="zh">时间为拍摄时间。<code>i_description</code> 字段为 JSON：</p>
+        <pre><code>{"purpose":"flood_detection","kind":"flood","id":"000001","correlation":0.312,
+ "severity":"minor","slot":0,"roi":{"x":560,"y":110,"width":1360,"height":360},
+ "step":1,"roi_source":"lines","source_frame":{"width":1920,"height":1080},
+ "captured_at":1792731693}</code></pre>
+        <p class="en"><code>id</code> is a local sequence number, also printed in the web log, for matching log lines to images. <code>correlation</code> is <code>null</code> when not a number.</p>
+        <p class="zh"><code>id</code> 是本地序号，同时出现在 web 日志中，用于把日志与图片对应起来。<code>correlation</code> 不是有效数字时为 <code>null</code>。</p>
+      </section>
+
+      <section id="fw-web">
+        <h2><span class="en">Web page and API</span><span class="zh">网页与 API</span></h2>
+        <p class="en">On flood firmware the web page shows the CURB and LANE lines, the upload area (solid if drawn, dashed if worked out from the lines), the gallery status and these buttons: Edit Geometry, Capture Baseline, View Current Baseline, Draw Upload Area (also redraws) and Delete Upload Area.</p>
+        <p class="zh">洪水检测固件的网页显示 CURB、LANE 线和上传区域（手动绘制为实线，由线推算为虚线）、图库状态，以及以下按钮：Edit Geometry、Capture Baseline、View Current Baseline、Draw Upload Area（也可重新绘制）和 Delete Upload Area。</p>
+        <div class="table-wrap"><table>
+          <thead><tr><th><span class="en">Request</span><span class="zh">请求</span></th><th><span class="en">Does</span><span class="zh">作用</span></th></tr></thead>
+          <tbody>
+            <tr><td><code>GET /api/flood/geometry</code></td><td><span class="en">Saved lines, geometry version and whether the gallery is calibrated or stale.</span><span class="zh">已保存的线、几何版本号，以及图库是否已校准或过期。</span></td></tr>
+            <tr><td><code>GET /api/flood/gallery</code></td><td><span class="en">Gallery contents: counts and, per slot, source, last match and whether its baseline frame is on the SD card.</span><span class="zh">图库组成：数量，以及每个槽位的来源、最近匹配和 SD 卡上是否有基线帧。</span></td></tr>
+            <tr><td><code>POST /api/flood/gallery/delete</code></td><td><span class="en">Body <code>{"index":0-7,"source":"manual"|"auto"}</code>. Queued (202), applied within 5 s.</span><span class="zh">请求体 <code>{"index":0-7,"source":"manual"|"auto"}</code>。排队（202），5 秒内执行。</span></td></tr>
+            <tr><td><code>POST /api/flood/gallery/clear_auto</code></td><td><span class="en">Removes all learned references and keeps manual ones.</span><span class="zh">删除全部自动学习的参考，保留手动参考。</span></td></tr>
+            <tr><td><code>GET /api/flood/upload_roi</code></td><td><span class="en">The drawn area (<code>configured</code>, <code>roi</code>) and the area in use (<code>effective</code>: <code>roi</code>, <code>step</code>, <code>source</code> = drawn / lines / full, output size).</span><span class="zh">已绘制的区域（<code>configured</code>、<code>roi</code>）和当前使用的区域（<code>effective</code>：<code>roi</code>、<code>step</code>、<code>source</code> = drawn / lines / full、输出尺寸）。</span></td></tr>
+            <tr><td><code>POST /api/flood/upload_roi</code></td><td><span class="en"><code>{"configured":true,"roi":{x,y,width,height}}</code> saves or replaces; <code>{"configured":false}</code> deletes. Out-of-range areas get 400.</span><span class="zh"><code>{"configured":true,"roi":{x,y,width,height}}</code> 保存或替换；<code>{"configured":false}</code> 删除。超出范围返回 400。</span></td></tr>
+          </tbody>
+        </table></div>
+      </section>
+
+      <section id="fw-storage">
+        <h2><span class="en">Where data is kept</span><span class="zh">数据存放位置</span></h2>
+        <div class="table-wrap"><table>
+          <thead><tr><th><span class="en">Data</span><span class="zh">数据</span></th><th><span class="en">Location</span><span class="zh">位置</span></th><th><span class="en">Erased by a full USB flash?</span><span class="zh">完整 USB 烧录是否清除</span></th></tr></thead>
+          <tbody>
+            <tr><td><span class="en">Curb and lane lines</span><span class="zh">路缘线与车道线</span></td><td><code>/spiffs/flood_geometry.bin</code></td><td><span class="en"><strong>Yes</strong></span><span class="zh"><strong>是</strong></span></td></tr>
+            <tr><td><span class="en">Reference gallery</span><span class="zh">参考图库</span></td><td><code>/download/flood_gallery.bin</code></td><td><span class="en"><strong>Yes</strong></span><span class="zh"><strong>是</strong></span></td></tr>
+            <tr><td><span class="en">Latest baseline image</span><span class="zh">最新基线图片</span></td><td><code>/download/flood_geometry_baseline.jpg</code></td><td><span class="en"><strong>Yes</strong></span><span class="zh"><strong>是</strong></span></td></tr>
+            <tr><td><span class="en">Baseline frames for rebuilding</span><span class="zh">用于重建的基线帧</span></td><td><code>/sdcard/flood/baseline_slotN.gray</code> <span class="en">(about 2 MB each, up to 8)</span><span class="zh">（每帧约 2 MB，最多 8 帧）</span></td><td><span class="en">No</span><span class="zh">否</span></td></tr>
+            <tr><td><span class="en">Upload area</span><span class="zh">上传区域</span></td><td><span class="en">NVS namespace</span><span class="zh">NVS 命名空间</span> <code>flood_up_roi</code></td><td><span class="en">No</span><span class="zh">否</span></td></tr>
+            <tr><td><span class="en">Heartbeat interval</span><span class="zh">心跳间隔</span></td><td><span class="en">NVS</span><span class="zh">NVS</span> <code>dm_settings/flood_hb_min</code></td><td><span class="en">No</span><span class="zh">否</span></td></tr>
+          </tbody>
+        </table></div>
+        <p class="en">The SD card's automatic cleanup (oldest 20% of recordings and snapshots once the card is 70% full) doesn't touch <code>/sdcard/flood</code>.</p>
+        <p class="zh">SD 卡自动清理（容量达到 70% 时删除最旧的 20% 录像和快照）不会触及 <code>/sdcard/flood</code>。</p>
+      </section>
+
+      <section id="fw-build">
+        <h2><span class="en">Build and flash</span><span class="zh">编译与烧录</span></h2>
+        <p class="en">ESP-IDF v5.4.3 for the ESP32-P4. Choose the flood model with <code>idf.py menuconfig</code> → Project AS → DNN Model Type (<code>CONFIG_DNN_TYPE_FLOOD</code>).</p>
+        <p class="zh">使用 ESP-IDF v5.4.3，目标芯片 ESP32-P4。通过 <code>idf.py menuconfig</code> → Project AS → DNN Model Type 选择洪水模型（<code>CONFIG_DNN_TYPE_FLOOD</code>）。</p>
+        <pre><code>. $HOME/esp/v5.4.3/esp-idf/export.sh
+idf.py reconfigure        <span class="cmt"># after adding source files (main/CMakeLists.txt globs them)</span>
+idf.py build
+idf.py -p PORT app-flash  <span class="cmt"># program only: keeps lines, gallery and baseline</span>
+idf.py -p PORT monitor</code></pre>
+        <div class="warn">
+          <p class="en"><strong>A plain <code>idf.py flash</code> erases the camera's saved lines, gallery and baseline.</strong> <code>main/CMakeLists.txt</code> flashes the <code>storage</code> (/spiffs) and <code>storage_dl</code> (/download) images from <code>spiffs_data/</code> and <code>spiffs_download/</code>. The camera then falls back to the default lines and skips every reading until a baseline is captured again. Use <code>app-flash</code> or OTA on a camera that's already set up.</p>
+          <p class="zh"><strong>直接执行 <code>idf.py flash</code> 会清除摄像头已保存的线、图库和基线。</strong><code>main/CMakeLists.txt</code> 会用 <code>spiffs_data/</code> 和 <code>spiffs_download/</code> 烧写 <code>storage</code>（/spiffs）和 <code>storage_dl</code>（/download）分区。之后摄像头回到默认线，并跳过所有读数，直到重新拍摄基线。已设置好的摄像头请使用 <code>app-flash</code> 或 OTA。</p>
+        </div>
+        <h3><span class="en">Host tests</span><span class="zh">主机测试</span></h3>
+        <p class="en">Pure-C parts and the web page scripts are tested on the PC with gcc and Node. cJSON comes from <code>$IDF_PATH</code> (default <code>~/esp/v5.4.3/esp-idf</code>).</p>
+        <p class="zh">纯 C 部分和网页脚本在 PC 上用 gcc 和 Node 测试。cJSON 取自 <code>$IDF_PATH</code>（默认 <code>~/esp/v5.4.3/esp-idf</code>）。</p>
+        <pre><code>bash host_tests/run.sh
+<span class="cmt"># host tests passed: upload_roi dm_upload upload_meta upload_area syntax js</span></code></pre>
+      </section>
+
+      <section id="fw-code">
+        <h2><span class="en">Code map</span><span class="zh">代码结构</span></h2>
+        <div class="table-wrap"><table>
+          <thead><tr><th><span class="en">Path</span><span class="zh">路径</span></th><th><span class="en">Contains</span><span class="zh">内容</span></th></tr></thead>
+          <tbody>
+            <tr><td><code>components/as_code/process_flood_detection/</code></td><td><span class="en">Detection core, shared with the simulator: curb check, gallery and learning, obstruction veto, capture and retry, upload-area maths.</span><span class="zh">检测核心，与模拟器共用：路缘检查、图库与学习、遮挡否决、取帧与重试、上传区域计算。</span></td></tr>
+            <tr><td><code>main/ai_process/flood_task.c</code></td><td><span class="en">The flood task: 60 s readings, 5 s baseline checks, gallery requests from the web page.</span><span class="zh">洪水任务：60 秒读数、5 秒基线检查、处理网页发来的图库请求。</span></td></tr>
+            <tr><td><code>main/ai_process/flood_upload*.c</code></td><td><span class="en">Encodes and uploads the crop; file name and description.</span><span class="zh">编码并上传裁剪图；生成文件名与描述。</span></td></tr>
+            <tr><td><code>main/bsp_video/flood_frame_tap.c</code>, <code>flood_roi.c</code></td><td><span class="en">Grabs grayscale plus the crop from one raw frame in the camera task; hardware JPEG encoder.</span><span class="zh">在摄像头任务中从同一原始帧取灰度图和裁剪图；硬件 JPEG 编码。</span></td></tr>
+            <tr><td><code>main/as_dm/dm_flood_*.c</code></td><td><span class="en">Device Manager: heartbeat setting, remote baseline switch, saved upload area.</span><span class="zh">Device Manager：心跳设置、远程基线开关、保存的上传区域。</span></td></tr>
+            <tr><td><code>main/as_dm/dm_upload_image.c</code></td><td><span class="en">HTTP upload of images from memory; one upload at a time.</span><span class="zh">从内存通过 HTTP 上传图片；同一时间只进行一个上传。</span></td></tr>
+            <tr><td><code>main/bsp_webserver/</code></td><td><span class="en">Web page (<code>www/</code>) and flood APIs.</span><span class="zh">网页（<code>www/</code>）与洪水检测 API。</span></td></tr>
+          </tbody>
+        </table></div>
+        <p class="en">Conventions: C, Chinese comments, English log messages, no file over 500 lines.</p>
+        <p class="zh">代码规范：C 语言，中文注释，英文日志，单个文件不超过 500 行。</p>
+      </section>
+
+      <section id="fw-trouble">
+        <h2><span class="en">Troubleshooting</span><span class="zh">故障排查</span></h2>
+        <div class="table-wrap"><table>
+          <thead><tr><th><span class="en">You see</span><span class="zh">现象</span></th><th><span class="en">Check</span><span class="zh">检查</span></th></tr></thead>
+          <tbody>
+            <tr><td><span class="en">Lines back at 560,230 → 1920,355; <code>calibrated: false</code></span><span class="zh">线回到 560,230 → 1920,355；<code>calibrated: false</code></span></td><td><span class="en">Saved data was erased, usually by a full USB flash. Redraw the lines and capture a baseline.</span><span class="zh">已保存的数据被清除，通常是完整 USB 烧录造成的。重新画线并拍摄基线。</span></td></tr>
+            <tr><td><span class="en">No heartbeat images</span><span class="zh">没有心跳图片</span></td><td><span class="en">Interval set to 0, an empty gallery (<code>skipping sample</code> in the log), or every reading <code>blocked</code>.</span><span class="zh">间隔为 0、图库为空（日志中出现 <code>skipping sample</code>），或每次读数都是 <code>blocked</code>。</span></td></tr>
+            <tr><td><code>upload failed: ESP_ERR_HTTP_CONNECT</code></td><td><span class="en">The connection failed before any image data was sent. The next line, <code>HTTP diag:</code>, gives the TLS error, socket errno, body size and free internal memory. TLS can only use internal RAM.</span><span class="zh">在发送图片数据之前连接就失败了。下一行 <code>HTTP diag:</code> 给出 TLS 错误码、socket errno、请求大小和剩余内部内存。TLS 只能使用内部 RAM。</span></td></tr>
+            <tr><td><code>Crash protection active</code></td><td><span class="en">10 crash reboots in a row pause flood detection; it resumes after 600 s of stable running.</span><span class="zh">连续 10 次异常重启后暂停洪水检测，稳定运行 600 秒后自动恢复。</span></td></tr>
+            <tr><td><code>Flood detection did not respond within 50 s</code></td><td><span class="en">The flood task was busy, for example uploading. Try the baseline switch again.</span><span class="zh">洪水任务正忙（例如正在上传）。再次打开基线开关即可。</span></td></tr>
+          </tbody>
+        </table></div>
+      </section>
+
+      <p class="part label"><span class="en">Simulator · ms500-p4-simulator</span><span class="zh">模拟器 · ms500-p4-simulator</span></p>
+
+      <section id="sim-setup">
+        <h2><span class="en">Install</span><span class="zh">安装</span></h2>
+        <p class="en">The simulator compiles the firmware's detection C code unmodified, straight from the firmware checkout, and runs it on videos, images or folders of images. Windows with Git Bash; needs MinGW gcc, CMake 3.20 or later, Ninja and Python 3.11.</p>
+        <p class="zh">模拟器直接从固件目录编译未经修改的检测 C 代码，在视频、图片或图片文件夹上运行。环境为 Windows + Git Bash，需要 MinGW gcc、CMake 3.20 及以上、Ninja 和 Python 3.11。</p>
+        <pre><code>py -3.11 -m venv .venv
+.venv/Scripts/python -m pip install -e ".[dev,onnx]"   <span class="cmt"># onnx runs models/traffic.onnx, the camera's model</span>
+export FLOOD_FIRMWARE_DIR=/d/git/NETWORK_P4_FLOOD_DETECTION   <span class="cmt"># optional: another firmware checkout</span></code></pre>
+        <p class="en">The native library rebuilds itself whenever a firmware or shim source is newer than <code>build/native/flood_core.dll</code>. Copy <code>models/traffic.onnx</code> in by hand (it isn't in git), or run with <code>--no-detector</code>.</p>
+        <p class="zh">当固件或适配层源码比 <code>build/native/flood_core.dll</code> 新时，原生库会自动重新编译。<code>models/traffic.onnx</code> 不在 git 中，需要手动复制；否则使用 <code>--no-detector</code> 运行。</p>
+      </section>
+
+      <section id="sim-cli">
+        <h2><span class="en">Command line</span><span class="zh">命令行</span></h2>
+        <pre><code><span class="cmt"># what the camera would have reported: 60 s readings, retry, heartbeat, uploaded images</span>
+.venv/Scripts/floodsim run clip.avi --reference dry.jpg
+<span class="cmt"># one camera's settings: heartbeat every 15 min, its drawn upload area, its serial number</span>
+.venv/Scripts/floodsim run clip.avi --reference dry.jpg --heartbeat 15 \
+    --upload-area 400,120,960,540 --sn MS500-H120-EP-2614-1001
+<span class="cmt"># every frame: correlation and veto curve, scored against labels</span>
+.venv/Scripts/floodsim run clip.avi --mode dense --reference dry.jpg --labels clip.labels.csv
+<span class="cmt"># several baselines, 5 s readings so a short clip shows the gallery learning</span>
+.venv/Scripts/floodsim run clip.avi --reference noon.jpg --reference night.jpg --period 5
+<span class="cmt"># a day of record_YYYYMMDD_HHMMSS.avi clips at their real start times</span>
+.venv/Scripts/floodsim run day_folder/ --reference noon.jpg
+<span class="cmt"># did a firmware edit change any result?</span>
+.venv/Scripts/floodsim compare out/before out/after
+<span class="cmt"># pure C, no Python</span>
+.venv/Scripts/floodsim export clip.avi --reference dry.jpg --out out/exp
+build/native/flood_sim.exe --reference out/exp/reference.pgm --frames out/exp/frames \
+    --boxes out/exp/boxes.csv --mode dense</code></pre>
+        <div class="table-wrap"><table>
+          <thead><tr><th><span class="en">Mode</span><span class="zh">模式</span></th><th><span class="en">Use it for</span><span class="zh">用途</span></th></tr></thead>
+          <tbody>
+            <tr><td><code>device</code></td><td><span class="en">One reading per 60 s of video, with retry, heartbeat and gallery learning, as on the camera.</span><span class="zh">每 60 秒视频时间读数一次，含重试、心跳和图库学习，与摄像头一致。</span></td></tr>
+            <tr><td><code>dense</code></td><td><span class="en">Scores every frame on its own, with no retry, heartbeat or learning. For curves and threshold tuning.</span><span class="zh">逐帧独立评分，不重试、不心跳、不学习。用于曲线分析和阈值调整。</span></td></tr>
+            <tr><td><span class="en">manual (GUI)</span><span class="zh">manual（图形界面）</span></td><td><span class="en">Pick a frame and press Sample or Score.</span><span class="zh">选择一帧，按 Sample 或 Score。</span></td></tr>
+          </tbody>
+        </table></div>
+        <h3><span class="en">A camera's settings (device mode)</span><span class="zh">摄像头设置（device 模式）</span></h3>
+        <div class="table-wrap"><table>
+          <thead><tr><th><span class="en">Option</span><span class="zh">选项</span></th><th><span class="en">Does</span><span class="zh">作用</span></th></tr></thead>
+          <tbody>
+            <tr><td><code>--heartbeat MIN</code></td><td><span class="en">Heartbeat interval in minutes, 0 to 1440; 0 turns it off; default 60. Converted to readings with <code>--period</code>, as the camera converts it with its 60 s period.</span><span class="zh">心跳间隔（分钟），0 到 1440；0 表示关闭；默认 60。按 <code>--period</code> 换算为读数次数，与摄像头按 60 秒周期换算的方式相同。</span></td></tr>
+            <tr><td><code>--upload-area X,Y,W,H|FILE.json</code></td><td><span class="en">The drawn upload area: whole numbers <code>x,y,w,h</code>, or a JSON file saved from the camera's <code>GET /api/flood/upload_roi</code>. Anything else stops the run. An area that breaks the firmware rules (sides of at least 32 px, inside 1920×1080, at most 518,400 px) gives a warning, and the run uses the curb and lane lines, as the camera would.</span><span class="zh">手动绘制的上传区域：整数 <code>x,y,w,h</code>，或从摄像头 <code>GET /api/flood/upload_roi</code> 保存的 JSON 文件。其他格式会终止运行。不符合固件规则（边长不小于 32 像素、位于 1920×1080 内、不超过 518,400 像素）的区域会给出警告，并像摄像头一样改用路缘线和车道线推算。</span></td></tr>
+            <tr><td><code>--sn SN</code></td><td><span class="en">Serial number used in upload file names. Default <code>SIM</code>.</span><span class="zh">上传文件名中使用的序列号，默认 <code>SIM</code>。</span></td></tr>
+            <tr><td><code>flood_sim.exe --heartbeat-every N</code></td><td><span class="en">The pure-C runner counts in readings instead: N readings between heartbeats, 0 turns them off.</span><span class="zh">纯 C 运行器按读数次数计：每 N 次读数一次心跳，0 表示关闭。</span></td></tr>
+          </tbody>
+        </table></div>
+        <p class="en">Tests: <code>ctest --test-dir build/native --output-on-failure</code> and <code>.venv/Scripts/python -m pytest</code>.</p>
+        <p class="zh">测试：<code>ctest --test-dir build/native --output-on-failure</code> 与 <code>.venv/Scripts/python -m pytest</code>。</p>
+      </section>
+
+      <section id="sim-out">
+        <h2><span class="en">Run folder and uploads</span><span class="zh">运行目录与上传图片</span></h2>
+        <p class="en">In device mode each <code>upload</code> or <code>heartbeat</code> reading writes the image the camera would have sent: the same crop (the drawn <code>--upload-area</code>, else the one derived from the curb and lane lines), the same file name, and a <code>.json</code> beside it holding the camera's description. Names and descriptions come from the firmware's own <code>flood_upload_meta.c</code>.</p>
+        <p class="zh">在 device 模式下，每次 <code>upload</code> 或 <code>heartbeat</code> 读数都会写出摄像头本应发送的图片：相同的裁剪区域（手动绘制的 <code>--upload-area</code>，否则由路缘线和车道线推算）、相同的文件名，以及旁边一个保存摄像头描述的 <code>.json</code> 文件。文件名和描述来自固件自己的 <code>flood_upload_meta.c</code>。</p>
+        <pre><code>out/run1/uploads/MS500-H120-EP-2614-1001_flood_20261022_220133.jpg
+out/run1/uploads/MS500-H120-EP-2614-1001_flood_20261022_220133.json   <span class="cmt"># same JSON as i_description</span>
+out/run2/uploads/SIM_flood_hb_20261022_214612.jpg                       <span class="cmt"># no --sn given</span></code></pre>
+        <p class="en">The time in the name is the clip's real start (<code>record_YYYYMMDD_HHMMSS</code>) or the input's modified time, plus the video offset.</p>
+        <p class="zh">文件名中的时间为片段的真实开始时间（<code>record_YYYYMMDD_HHMMSS</code>）或输入文件的修改时间，加上视频内的偏移。</p>
+        <div class="table-wrap"><table>
+          <thead><tr><th><span class="en">File</span><span class="zh">文件</span></th><th><span class="en">What to look at</span><span class="zh">关注内容</span></th></tr></thead>
+          <tbody>
+            <tr><td><code>samples.csv</code></td><td><span class="en">One row per reading. <code>upload_file</code> names the image written for that reading, or is empty.</span><span class="zh">每次读数一行。<code>upload_file</code> 为该次读数写出的图片名，没有则为空。</span></td></tr>
+            <tr><td><code>run.json</code></td><td><span class="en">Everything needed to reproduce the run. Device runs also record <code>heartbeat</code> (<code>minutes</code> and <code>readings</code>), <code>upload_area</code> (the drawn area, or null), <code>upload_area_used</code> (the crop actually used) and <code>sn</code>.</span><span class="zh">复现本次运行所需的全部信息。device 模式还记录 <code>heartbeat</code>（<code>minutes</code> 和 <code>readings</code>）、<code>upload_area</code>（手动绘制的区域，或 null）、<code>upload_area_used</code>（实际使用的裁剪区域）和 <code>sn</code>。</span></td></tr>
+            <tr><td><code>summary.txt</code></td><td><span class="en">Outcome counts, references learned and gallery size, plus scoring when labels were given.</span><span class="zh">各结果计数、学习到的参考与图库大小；提供标签时还有评分。</span></td></tr>
+            <tr><td><code>uploads/</code></td><td><span class="en">The images and their <code>.json</code> descriptions, device mode only.</span><span class="zh">图片及其 <code>.json</code> 描述，仅 device 模式。</span></td></tr>
+          </tbody>
+        </table></div>
+      </section>
+
+      <section id="sim-gui">
+        <h2><span class="en">GUI</span><span class="zh">图形界面</span></h2>
+        <pre><code>.venv/Scripts/python -m pip install -e ".[dev,gui]"
+.venv/Scripts/floodsim gui clip.avi    <span class="cmt"># or an image, or a folder of images</span></code></pre>
+        <ul>
+          <li><span class="en"><strong>Layout:</strong> tools on the left, the frame with overlays in the centre, verdict and device state on the right, a correlation plot aligned with the scrubber below, then the samples table.</span><span class="zh"><strong>布局：</strong>左侧为工具，中间是带叠加的画面，右侧为判定与设备状态，下方是与进度条对齐的相关系数曲线，最下面是读数表。</span></li>
+          <li><span class="en"><strong>Manual:</strong> Sample runs the full capture; Score scores this frame only; Add reference adds a manual baseline; Reset state clears the heartbeat counter and learned references.</span><span class="zh"><strong>手动：</strong>Sample 执行完整取帧流程；Score 只给当前帧评分；Add reference 添加手动基线；Reset state 清除心跳计数和学习到的参考。</span></li>
+          <li><span class="en"><strong>Editing:</strong> drag the curb and lane endpoints (the gallery goes stale until rebuilt, as on the camera); draw or delete obstruction boxes, saved to <code>&lt;input&gt;.boxes.edited.csv</code>.</span><span class="zh"><strong>编辑：</strong>拖动路缘线和车道线端点（与摄像头一样，图库在重建前标记为过期）；绘制或删除遮挡框，保存到 <code>&lt;input&gt;.boxes.edited.csv</code>。</span></li>
+          <li><span class="en"><strong>Upload area:</strong> Upload area ▸ Draw (or the <em>Draw upload area</em> tool) and Upload area ▸ Delete, saved to <code>&lt;input&gt;.upload_area.json</code>. The orange box shows the area in use, dashed when it is derived from the lines.</span><span class="zh"><strong>上传区域：</strong>Upload area ▸ Draw（或 <em>Draw upload area</em> 工具）绘制，Upload area ▸ Delete 删除，保存到 <code>&lt;input&gt;.upload_area.json</code>。橙色框表示当前使用的区域，由线推算时为虚线。</span></li>
+          <li><span class="en"><strong>Heartbeat and serial number:</strong> the <em>Heartbeat</em> and <em>Serial number</em> fields sit in the State panel. The device run dialog starts from the heartbeat value.</span><span class="zh"><strong>心跳与序列号：</strong><em>Heartbeat</em> 和 <em>Serial number</em> 字段位于 State 面板。device 运行对话框以该心跳值为初始值。</span></li>
+          <li><span class="en"><strong>Batch:</strong> Run ▸ Device or Dense uses the same runners as the command line; File ▸ Export run writes the same folder as <code>floodsim run</code>.</span><span class="zh"><strong>批量：</strong>Run ▸ Device / Dense 使用与命令行相同的运行器；File ▸ Export run 输出与 <code>floodsim run</code> 相同的文件夹。</span></li>
+        </ul>
+      </section>
+
+      <section id="sim-gaps">
+        <h2><span class="en">Differences from the camera</span><span class="zh">与摄像头的差异</span></h2>
+        <p class="en">The upload crop, file names and descriptions are identical: they are compiled from the firmware's <code>flood_upload_roi.c</code> and <code>flood_upload_meta.c</code>. Only the JPEG encoder differs:</p>
+        <p class="zh">上传裁剪、文件名和描述完全一致：它们由固件的 <code>flood_upload_roi.c</code> 和 <code>flood_upload_meta.c</code> 编译而来。只有 JPEG 编码器不同：</p>
+        <div class="table-wrap"><table>
+          <thead><tr><th><span class="en">Item</span><span class="zh">项目</span></th><th><span class="en">Camera</span><span class="zh">摄像头</span></th><th><span class="en">Simulator</span><span class="zh">模拟器</span></th></tr></thead>
+          <tbody>
+            <tr><td><span class="en">JPEG encoder</span><span class="zh">JPEG 编码器</span></td><td><span class="en">P4 hardware encoder, quality 90</span><span class="zh">P4 硬件编码器，质量 90</span></td><td><span class="en">OpenCV, quality 90, so files are not byte-identical</span><span class="zh">OpenCV，质量 90，因此文件并非逐字节相同</span></td></tr>
+          </tbody>
+        </table></div>
+        <p class="en">Values from the firmware's device code (not the shared core) are copied into <code>native/device_constants.h</code> with their source lines. Detection results come from the shared C code: correlation, severity, veto, retry and gallery behaviour.</p>
+        <p class="zh">固件设备层代码（非共用核心）中的数值被复制到 <code>native/device_constants.h</code>，并注明来源行。检测结果来自共用的 C 代码：相关系数、严重程度、遮挡否决、重试和图库行为。</p>
+      </section>
+
+      <section id="docs">
+        <h2><span class="en">Further reading</span><span class="zh">延伸阅读</span></h2>
+        <ul>
+          <li><code>NETWORK_P4_FLOOD_DETECTION/README.md</code> — <span class="en">project overview (Chinese)</span><span class="zh">项目总览</span></li>
+          <li><code>docs/superpowers/specs/2026-10-22-flood-upload-roi-design.md</code> — <span class="en">upload crop design</span><span class="zh">上传裁剪设计</span></li>
+          <li><code>docs/flood-site-relocation-open-issues.md</code> — <span class="en">moving a camera to a new site</span><span class="zh">摄像头迁移到新地点的注意事项</span></li>
+          <li><code>docs/task.md</code> — <span class="en">task log</span><span class="zh">任务记录</span></li>
+          <li><code>ms500-p4-simulator/docs/HANDBOOK.md</code> <span class="en">and</span><span class="zh">及</span> <code>HANDBOOK.pdf</code> — <span class="en">full simulator handbook</span><span class="zh">完整的模拟器手册</span></li>
+        </ul>
+      </section>
+    </main>
+  </div>
+</div>
+
+<script>
+// 语言与主题切换：语言默认跟随浏览器，主题默认跟随系统；选择保存在本地（存储不可用时忽略）
+(function () {
+  var root = document.documentElement;
+  var darkQuery = window.matchMedia ? window.matchMedia("(prefers-color-scheme: dark)") : null;
+  function load(key) { try { return localStorage.getItem(key); } catch (e) { return null; } }
+  function save(key, value) { try { localStorage.setItem(key, value); } catch (e) {} }
+
+  function setLang(lang) {
+    root.setAttribute("data-lang", lang);
+    root.setAttribute("lang", lang === "zh" ? "zh-CN" : "en");
+    document.getElementById("btn-en").setAttribute("aria-pressed", String(lang === "en"));
+    document.getElementById("btn-zh").setAttribute("aria-pressed", String(lang === "zh"));
+  }
+  // 未选择主题时不设 data-theme，交给系统设置；按钮显示当前实际主题
+  function setTheme(theme) {
+    if (theme === "light" || theme === "dark") root.setAttribute("data-theme", theme);
+    else root.removeAttribute("data-theme");
+    var effective = theme || (darkQuery && darkQuery.matches ? "dark" : "light");
+    document.getElementById("btn-light").setAttribute("aria-pressed", String(effective === "light"));
+    document.getElementById("btn-dark").setAttribute("aria-pressed", String(effective === "dark"));
+  }
+
+  var savedLang = load("ms500-guide-lang");
+  setLang(savedLang === "en" || savedLang === "zh" ? savedLang : (/^zh/i.test(navigator.language || "") ? "zh" : "en"));
+  var savedTheme = load("ms500-guide-theme");
+  var chosenTheme = savedTheme === "light" || savedTheme === "dark" ? savedTheme : null;
+  setTheme(chosenTheme);
+  if (darkQuery && darkQuery.addEventListener) {
+    darkQuery.addEventListener("change", function () { if (!chosenTheme) setTheme(null); });
+  }
+
+  document.querySelectorAll("[data-lang-set]").forEach(function (btn) {
+    btn.addEventListener("click", function () {
+      var lang = btn.getAttribute("data-lang-set");
+      setLang(lang);
+      save("ms500-guide-lang", lang);
+    });
+  });
+  document.querySelectorAll("[data-theme-set]").forEach(function (btn) {
+    btn.addEventListener("click", function () {
+      chosenTheme = btn.getAttribute("data-theme-set");
+      setTheme(chosenTheme);
+      save("ms500-guide-theme", chosenTheme);
+    });
+  });
+})();
+</script>
+</body>
+</html>
